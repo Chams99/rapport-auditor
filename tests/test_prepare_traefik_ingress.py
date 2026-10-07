@@ -40,6 +40,18 @@ class FakeDocker:
             "networks": {"traefik": {"name": "traefik", "external": True}},
         }
         self.networks = {
+            "host": {
+                "Name": "host",
+                "Driver": "host",
+                "IPAM": {"Driver": "", "Options": None, "Config": None},
+                "Containers": {},
+            },
+            "none": {
+                "Name": "none",
+                "Driver": "null",
+                "IPAM": {"Driver": "", "Options": None, "Config": None},
+                "Containers": {},
+            },
             "traefik": {
                 "Name": "traefik",
                 "Driver": "bridge",
@@ -249,6 +261,35 @@ def test_prepare_aborts_on_route_overlap_before_writing_override(fake_docker):
 
     assert not helper.OVERRIDE.exists()
     assert helper.NETWORK not in fake_docker.networks
+
+
+def test_prepare_ignores_builtin_networks_with_null_ipam_configs(fake_docker):
+    report = helper.prepare(fake_docker)
+
+    assert f"traefik_peer={helper.PEER}" in report
+    assert helper.OVERRIDE.exists()
+
+
+def test_prepare_rejects_null_ipam_config_for_dedicated_network(fake_docker):
+    fake_docker.networks[helper.NETWORK] = {
+        "Name": helper.NETWORK,
+        "Driver": "bridge",
+        "Internal": True,
+        "IPAM": {"Driver": "default", "Options": None, "Config": None},
+        "Containers": {},
+    }
+
+    with pytest.raises(helper.PreflightError, match="IPAM record"):
+        helper.prepare(fake_docker)
+
+    assert not helper.OVERRIDE.exists()
+    assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
+
+
+@pytest.mark.parametrize("ipam", ["invalid", {"Config": "invalid"}, {"Config": [None]}])
+def test_network_config_rejects_malformed_ipam_shapes(ipam):
+    with pytest.raises(helper.PreflightError, match="IPAM record|network subnet"):
+        helper._network_config({"IPAM": ipam})
 
 
 def test_prepare_allows_only_owned_bridge_routes_on_rerun(fake_docker):

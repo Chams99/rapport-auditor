@@ -328,8 +328,22 @@ def _network_model(name: str, runner: Runner) -> dict[str, Any]:
 
 
 def _network_config(network: dict[str, Any]) -> list[dict[str, Any]]:
+    is_builtin = (network.get("Name"), network.get("Driver")) in {
+        ("host", "host"),
+        ("none", "null"),
+    }
     ipam = network.get("IPAM")
-    configs = ipam.get("Config", []) if isinstance(ipam, dict) else []
+    if ipam is None:
+        if is_builtin:
+            return []
+        raise PreflightError("A Docker network IPAM record was invalid.")
+    if not isinstance(ipam, dict):
+        raise PreflightError("A Docker network IPAM record was invalid.")
+    configs = ipam.get("Config")
+    if configs is None:
+        if is_builtin:
+            return []
+        raise PreflightError("A Docker network IPAM record was invalid.")
     if not isinstance(configs, list):
         raise PreflightError("A Docker network IPAM record was invalid.")
     if any(not isinstance(item, dict) or not isinstance(item.get("Subnet"), str) for item in configs):
