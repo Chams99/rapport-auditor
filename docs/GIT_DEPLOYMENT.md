@@ -1,8 +1,34 @@
 # Private GitHub repository and manual VPS updates
 
-Rapport Auditor is prepared for the private repository `Chams99/rapport-auditor`. The VPS uses a repository-scoped, read-only deploy key to fetch source. There is no GitHub Actions workflow or automatic deployment: publishing a change and updating the VPS are separate, manual steps.
+Rapport Auditor is in the private repository `Chams99/rapport-auditor`. If the VPS already has a GitHub account SSH identity that can read this repository, use it; no new key setup is needed. A deploy key attached only to the portfolio repository cannot read this one. The optional repository-scoped read-only key below is only for a VPS without another authorized GitHub identity. There is no GitHub Actions workflow or automatic deployment: publishing a change and updating the VPS are separate, manual steps.
 
 This candidate has no `LICENSE`/`COPYING` file or license metadata. Keep it private and do not infer public redistribution rights from the GitHub repository.
+
+## Quick path after one-time co-hosting setup
+
+Before starting the app, the operator must configure the persistent internal Traefik network and fixed peer address, set the exact `RAPPORT_AUDITOR_TRUSTED_PROXY`, choose `RAPPORT_AUDITOR_APP_MEMORY_LIMIT` and `RAPPORT_AUDITOR_APP_CPU_LIMIT` from measured VPS capacity, and create the private secret at the path in `deployment/.env.traefik`. Complete the DNS, forwarding-header, timeout, access-log, and capacity checks in [the co-hosting runbook](COHOSTING.md). These are one-time host setup steps; they cannot be filled with guessed values.
+
+If the VPS's existing GitHub SSH identity has read access, run this in its normal shell. From Windows PowerShell, connect first:
+
+```powershell
+ssh my-vps
+```
+
+At the VPS shell, clone the reviewed initial commit, verify the pin, then apply the separate Rapport Compose project:
+
+```sh
+mkdir -p "$HOME/services"
+git clone git@github.com:Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
+cd "$HOME/services/rapport-auditor"
+git fetch origin main --prune
+git switch --detach f68bde82fd80fa7ffffc76842126a66b2af4ccf7
+test "$(git rev-parse HEAD)" = f68bde82fd80fa7ffffc76842126a66b2af4ccf7
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml config --quiet
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml build app
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml up -d
+```
+
+If the clone says permission denied, stop and use an existing authorized account identity or the optional read-only deploy-key setup below. Do not make the repository public to bypass authentication. If using that optional key, replace the clone URL's host with `github-rapport-auditor` after configuring the SSH alias. The profile does not create the Traefik network or secret, and these commands do not deploy the portfolio.
 
 ## Create the private repository once
 
@@ -23,18 +49,29 @@ git ls-remote --symref origin HEAD
 
 Confirm the final metadata reports `isPrivate: true`, and that `ls-remote` reports the approved candidate SHA on the default branch. Do not publish this project to the portfolio repository or to the existing `python-Latex` repository. `gh repo create` creates the private remote and pushes the reviewed local branch; it does not configure deployment.
 
-## Give the VPS read-only access
+## Optional: add a repository-scoped read-only key
 
-From the operator's normal terminal, connect to the VPS and generate a dedicated key there. Generate it once, under the same Linux account that will own the checkout. The private key stays on the VPS and should never be copied into chat, source control, or GitHub.
+Use this only if the VPS has no existing GitHub account SSH identity with access to this repository. From the operator's normal terminal, connect to the VPS and generate a dedicated key there. Generate it once, under the same Linux account that will own the checkout. The private key stays on the VPS and should never be copied into chat, source control, or GitHub.
+
+From Windows PowerShell, connect to the VPS:
+
+```powershell
+ssh my-vps
+```
+
+Then run this block at the VPS shell:
 
 ```sh
-ssh my-vps
 umask 077
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
-ssh-keygen -t ed25519 -f "$HOME/.ssh/rapport-auditor-readonly" -C "rapport-auditor VPS read-only" -N ""
-chmod 600 "$HOME/.ssh/rapport-auditor-readonly"
-cat "$HOME/.ssh/rapport-auditor-readonly.pub"
+if [ -e "$HOME/.ssh/rapport-auditor-readonly" ] || [ -e "$HOME/.ssh/rapport-auditor-readonly.pub" ]; then
+  echo "Key path already exists; stop and inspect it before continuing."
+else
+  ssh-keygen -t ed25519 -f "$HOME/.ssh/rapport-auditor-readonly" -C "rapport-auditor VPS read-only" -N "" &&
+  chmod 600 "$HOME/.ssh/rapport-auditor-readonly" &&
+  cat "$HOME/.ssh/rapport-auditor-readonly.pub"
+fi
 ```
 
 In GitHub, open **Chams99/rapport-auditor → Settings → Deploy keys → Add deploy key**. Paste only the `.pub` value, use a recognizable title such as `Rapport VPS read-only`, and leave **Allow write access** unchecked. A deploy key is attached to one repository, and its private half stays on the server. This passphrase-free key is a persistent read-only credential; limit VPS account access and remove the key from GitHub if the VPS is retired or compromised. See [GitHub's deploy-key instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys).
@@ -64,7 +101,7 @@ Keep the Rapport checkout separate from the portfolio checkout. Clone it under t
 
 ```sh
 mkdir -p "$HOME/services"
-git clone git@github-rapport-auditor:Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
+git clone git@github.com:Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
 cd "$HOME/services/rapport-auditor"
 git status --short
 
@@ -76,6 +113,8 @@ git switch --detach "$RAPPORT_RELEASE_SHA"
 test "$(git rev-parse HEAD)" = "$RAPPORT_RELEASE_SHA"
 git status --short
 ```
+
+The clone command above uses an existing GitHub account SSH identity. If you configured the optional deploy-key alias, use `git@github-rapport-auditor:Chams99/rapport-auditor.git` as the clone URL instead.
 
 For a later source update, stop if `git status --short` reports local changes. Save the current known-good commit SHA, fetch `main`, and switch to the reviewed immutable commit SHA supplied by the maintainer:
 
