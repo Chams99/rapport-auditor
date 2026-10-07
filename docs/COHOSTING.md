@@ -91,6 +91,8 @@ After `docker compose config --quiet`, the script builds `app`, runs `up -d` and
 
 The profile publishes no host ports and starts no Caddy. Do not use the standalone `scripts/verify_release.sh`, which assumes the Caddy profile and host ports 80/443. If the script fails after `up -d`, containers may remain running; do not treat the deployment as signed off. Share the non-secret error/status output for diagnosis.
 
+For the isolated Linux/Python/Redis regression gate, run `bash scripts/verify_cohost.sh` from the repository root. It runs the full pytest suite with a disposable Redis on a temporary internal network, using the checked-out source read-only; it removes only its own test containers and network. Docker build cache and the uniquely tagged test-builder image are retained. This gate does not validate the public Traefik route or production capacity.
+
 Before announcing the URL, complete the outstanding live checks above: confirm HTTP redirects to valid HTTPS; test valid and invalid origins from an external client; verify the real proxy chain and that forged `X-Forwarded-For` cannot evade the shared Redis quota; confirm the synthetic canary and sensitive request data do not appear in app/Traefik logs; verify the 1,100,000-byte cap, in-flight limit, timeouts, and observability behavior; and measure resource use under a synthetic maximum-body/two-worker test. Do not stop a shared Redis service to simulate failure. Do not upload personal reports for acceptance testing.
 
 ## Rapport-only rollback
