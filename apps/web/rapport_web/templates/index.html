@@ -6,6 +6,37 @@
 {% set field_errors = errors|default({}) %}
 {% set text_error = field_errors.get('text') or field_errors.get('input') %}
 {% set file_error = field_errors.get('file') %}
+{% set text_value = text|default('', true) %}
+{% set sample_text_en = 'This chapter presents a fictional method. This chapter presents a fictional result. This chapter presents a fictional discussion. The results show a made-up increase in this synthetic example.' %}
+{% set sample_text_fr = 'Ce chapitre présente une méthode fictive. Ce chapitre présente un résultat fictif. Ce chapitre présente une discussion fictive. Les résultats montrent une hausse inventée dans cet exemple synthétique.' %}
+{% set max_chars = limits.max_input_chars|default(250000) %}
+{% set max_input_bytes = limits.max_input_bytes|default(1000000) %}
+{% set max_lines = limits.max_lines|default(10000) %}
+{% set max_upload_bytes = limits.max_upload_bytes|default(1000000) %}
+{% set asset_versions = asset_versions|default({}) %}
+{% set findings = report.findings|default(public_findings|default([], true), true) if mode == 'audit' and report else [] %}
+{% set citation_cues = report.citation_cues|default([], true) if mode == 'audit' and report else [] %}
+{% set findings_total = report.findings_total_count|default(findings|length) if mode == 'audit' and report else 0 %}
+{% set findings_displayed = report.findings_displayed_count|default(findings|length) if mode == 'audit' and report else 0 %}
+{% set findings_omitted = report.findings_omitted_count|default(0) if mode == 'audit' and report else 0 %}
+{% set citations_total = report.citation_cues_total_count|default(citation_cues|length) if mode == 'audit' and report else 0 %}
+{% set citations_omitted = report.citation_cues_omitted_count|default(0) if mode == 'audit' and report else 0 %}
+{% set writing_displayed = findings|rejectattr('category', 'equalto', 'source')|list|length %}
+{% set source_displayed = findings|selectattr('category', 'equalto', 'source')|list|length %}
+{% set source_name_value = source_name|default('pasted text') %}
+{% set display_source_name = ('Texte collé' if is_fr else 'Pasted text') if source_name_value == 'pasted text' else source_name_value %}
+{% set editor_state = 'invalid' if error else 'ready' if text_value|trim or mode in ['audit', 'revise'] else 'empty' %}
+{% if is_public %}
+  {% set privacy_full_en = 'Your text is sent to this server and processed in memory. The app does not intentionally retain it after processing or send it to an external writing service. Hosting logs, backups and their retention settings have not been verified. Use the fictional example or non-sensitive text.' %}
+  {% set privacy_full_fr = 'Votre texte est envoyé à ce serveur et traité en mémoire. L’application ne le conserve pas intentionnellement après traitement et ne l’envoie pas à un service de rédaction externe. Les journaux d’hébergement, les sauvegardes et leurs durées de conservation n’ont pas été vérifiés. Utilisez l’exemple fictif ou un texte non sensible.' %}
+  {% set safety_summary_en = 'Public service: text is sent to this hosting server. Use the fictional example or non-sensitive text.' %}
+  {% set safety_summary_fr = 'Service public : le texte est envoyé à ce serveur d’hébergement. Utilisez l’exemple fictif ou un texte non sensible.' %}
+{% else %}
+  {% set privacy_full_en = 'Your text is processed by this local server and is not intentionally stored by the app after processing. The operating system or browser may still keep temporary copies.' %}
+  {% set privacy_full_fr = 'Votre texte est traité par ce serveur local et n’est pas enregistré volontairement par l’application après traitement. Le système d’exploitation ou le navigateur peut néanmoins conserver des copies temporaires.' %}
+  {% set safety_summary_en = 'Local service: text is processed by this server. Avoid sensitive passages.' %}
+  {% set safety_summary_fr = 'Service local : le texte est traité par ce serveur. Évitez les passages sensibles.' %}
+{% endif %}
 <html lang="{{ active_locale }}">
   <head>
     <meta charset="utf-8">
@@ -16,8 +47,8 @@
     <link rel="alternate" hreflang="fr" href="/?locale=fr">
     <link rel="alternate" hreflang="x-default" href="/">
     <title>Rapport Auditor — {{ 'Atelier de révision' if is_fr else 'Writing review desk' }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_versions.get('style.css', '')) }}">
+    <script src="{{ url_for('static', filename='app.js', v=asset_versions.get('app.js', '')) }}" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main-content">{{ 'Aller au contenu principal' if is_fr else 'Skip to main content' }}</a>
@@ -41,64 +72,93 @@
       <main id="main-content" class="page-content" data-mode="{{ mode|default('', true) }}" data-locale="{{ active_locale }}">
         <section class="intro" aria-labelledby="page-title">
           <div class="intro-copy">
-            <p class="eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>{{ 'Espace de travail académique' if is_fr else 'Academic writing workbench' }}</p>
-            <h1 id="page-title">{{ 'Relisez avec plus de clarté.' if is_fr else 'Make the next draft clearer.' }}</h1>
-          <p class="intro-lede">{{ 'Repérez les répétitions, les formulations convenues et les affirmations qui mériteraient un repère de source visible, puis décidez quoi retravailler.' if is_fr else 'Review repetition, stock phrasing and claims that may need visible source context, then decide what to revise.' }}</p>
+            <p class="eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>{{ 'Espace de travail académique' if is_fr else 'Academic writing workspace' }}</p>
+            <h1 id="page-title">{{ 'Relisez votre prochain brouillon.' if is_fr else 'Review your next draft.' }}</h1>
+            <p class="intro-lede">{{ 'Repérez des répétitions, des formulations à revoir et des affirmations qui méritent un contrôle de source. Gardez la main sur chaque décision.' if is_fr else 'Spot repeated wording, phrasing to review, and claims that may need a source check. You decide what to change.' }}</p>
           </div>
-          <p class="privacy-note">
-            <span class="privacy-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" focusable="false"><rect x="3.5" y="3.7" width="13" height="5" rx="1.2"/><rect x="3.5" y="11.3" width="13" height="5" rx="1.2"/><path d="M6 6.2h.01M8.7 6.2h5.1M6 13.8h.01M8.7 13.8h5.1"/></svg>
-            </span>
-            <span class="privacy-copy">{% if is_public %}{{ 'Votre texte est envoyé à ce serveur et traité en mémoire. L’application ne le conserve pas intentionnellement après traitement et ne l’envoie pas à un service de rédaction externe. Les journaux d’hébergement, les sauvegardes et leurs durées de conservation n’ont pas été vérifiés. Utilisez l’exemple fictif ou un texte non sensible.' if is_fr else 'Your text is sent to this server and processed in memory. The app does not intentionally retain it after processing or send it to an external writing service. Hosting logs, backups and their retention settings have not been verified. Use the fictional example or non-sensitive text.' }}{% else %}{{ 'Votre texte est traité par ce serveur local et n’est pas enregistré volontairement par l’application après traitement. Le système d’exploitation ou le navigateur peut néanmoins conserver des copies temporaires.' if is_fr else 'Your text is processed by this local server and is not intentionally stored by the app after processing. The operating system or browser may still keep temporary copies.' }}{% endif %}</span>
-          </p>
+          <div class="scope-panel">
+            <p class="scope-summary">{{ 'Pistes rédactionnelles et de citation en anglais ou en français. Pas de vérification générale de grammaire, de faits ou de sources.' if is_fr else 'English/French writing and citation prompts. Not a general grammar, fact, or source checker.' }}</p>
+            <details class="limits-disclosure">
+              <summary>{{ 'Formats et limites' if is_fr else 'Supported input and limits' }}</summary>
+              <ul>
+                <li>{{ 'Texte collé : ' ~ max_chars ~ ' caractères, ' ~ max_input_bytes ~ ' octets et ' ~ max_lines ~ ' lignes maximum. Fichier UTF-8 .txt/.tex : ' ~ ((max_upload_bytes / 1000000)|round(1)) ~ ' Mo maximum.' if is_fr else 'Pasted text: up to ' ~ max_chars ~ ' characters, ' ~ max_input_bytes ~ ' bytes, and ' ~ max_lines ~ ' lines. UTF-8 .txt/.tex upload: up to ' ~ ((max_upload_bytes / 1000000)|round(1)) ~ ' MB.' }}</li>
+                <li>{{ 'Le texte LaTeX est traité comme du texte ; il n’est pas compilé. Les repères visibles ne sont ni résolus ni évalués et l’outil ne vérifie pas les faits, les références ou l’auteur.' if is_fr else 'LaTeX is handled as text and is not compiled. Visible citation cues are not resolved or evaluated; the tool does not check factual claims, bibliography entries or source contents, plagiarism, or authorship.' }}</li>
+              </ul>
+            </details>
+          </div>
         </section>
 
         <div class="workbench">
           <section class="editor-card surface-card" aria-labelledby="editor-title">
             <div class="card-topline">
               <span class="step-label">{{ 'Votre document' if is_fr else 'Your document' }}</span>
-              <span class="editor-state"><span class="editor-state-dot" aria-hidden="true"></span>{{ 'Prêt à analyser' if is_fr else 'Ready to review' }}</span>
+              <span class="editor-state" data-state="{{ editor_state }}">
+                <span class="editor-state-dot" aria-hidden="true"></span>
+                <span id="editor-state-text">{{ 'Vérifiez le champ signalé.' if is_fr and editor_state == 'invalid' else 'Check the highlighted field.' if editor_state == 'invalid' else 'Texte prêt à relire' if is_fr and editor_state == 'ready' else 'Text ready to review' if editor_state == 'ready' else 'Ajoutez un passage pour commencer' if is_fr else 'Add a passage to begin' }}</span>
+              </span>
             </div>
             <div class="editor-heading">
               <div>
-                <p class="eyebrow">{{ 'Espace de rédaction' if is_fr else 'Writing workspace' }}</p>
-                <h2 id="editor-title">{{ 'Apportez votre texte' if is_fr else 'Bring your text' }}</h2>
+                <h2 id="editor-title">{{ 'Ajoutez votre texte' if is_fr else 'Add your text' }}</h2>
               </div>
-              <span class="format-tag">TXT <span aria-hidden="true">·</span> TEX</span>
             </div>
+
+            <aside class="safety-panel" aria-label="{{ 'Confidentialité' if is_fr else 'Privacy' }}">
+              <p class="safety-summary">
+                <span class="safety-mark" aria-hidden="true">i</span>
+                <span>{{ safety_summary_fr if is_fr else safety_summary_en }}</span>
+              </p>
+              <details class="privacy-disclosure">
+                <summary>{{ 'Comment le texte est traité' if is_fr else 'How text is handled' }}</summary>
+                <p>{{ privacy_full_fr if is_fr else privacy_full_en }}</p>
+              </details>
+            </aside>
 
             {% if error %}
               <div class="form-alert" role="alert" tabindex="-1">
                 <span class="alert-mark" aria-hidden="true">!</span>
-                <span>{% if text_error and file_error %}{{ 'Please fix the highlighted fields below to continue.' if not is_fr else 'Corrigez les champs signalés ci-dessous pour continuer.' }}{% elif text_error or file_error %}{{ 'Please fix the highlighted field below to continue.' if not is_fr else 'Corrigez le champ signalé ci-dessous pour continuer.' }}{% else %}{{ error }}{% endif %}</span>
+                <div>
+                  <h3>{{ 'Un problème est survenu' if is_fr else 'There is a problem' }}</h3>
+                  {% if text_error or file_error %}
+                    <ul>
+                      {% if text_error %}<li><a href="#report-text">{{ text_error }}</a></li>{% endif %}
+                      {% if file_error %}<li><a href="#report-file">{{ file_error }}</a></li>{% endif %}
+                    </ul>
+                  {% else %}
+                    <p>{{ error }}</p>
+                  {% endif %}
+                </div>
               </div>
             {% endif %}
 
-            <form id="report-form" class="report-form" method="post" action="/audit" enctype="multipart/form-data" data-max-chars="{{ limits.max_input_chars|default(250000) }}" data-max-file-bytes="{{ limits.max_upload_bytes|default(10485760) }}">
+            <form id="report-form" class="report-form" method="post" action="/audit" enctype="multipart/form-data" data-max-chars="{{ max_chars }}" data-max-file-bytes="{{ max_upload_bytes }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="locale" value="{{ active_locale }}">
 
-              <div class="format-row language-row">
-                <label for="content-language">{{ 'Langue du document' if is_fr else 'Document language' }}</label>
-                <select id="content-language" name="content_language" aria-describedby="language-help">
-                  <option value="en" {% if selected_content_language == 'en' %}selected{% endif %}>English</option>
-                  <option value="fr" {% if selected_content_language == 'fr' %}selected{% endif %}>Français</option>
-                </select>
-                <p id="language-help" class="field-help">{{ 'Indépendante de la langue de l’interface.' if is_fr else 'Independent from the interface language.' }}</p>
-              </div>
-
               <div class="field-heading">
                 <label for="report-text">{{ 'Coller le texte du rapport ou du LaTeX' if is_fr else 'Paste report text or LaTeX' }}</label>
-                <span class="field-optional">{{ 'Collez ou importez un fichier' if is_fr else 'Paste or upload a file' }}</span>
-              </div>
-              <div class="textarea-wrap">
-                <textarea id="report-text" name="text" rows="13" lang="{{ selected_content_language }}" autocomplete="off" spellcheck="true" aria-invalid="{{ 'true' if text_error else 'false' }}" aria-describedby="text-help text-error" placeholder="{{ 'Collez ici un chapitre, un résumé ou une section…' if is_fr else 'Paste a chapter, abstract or report section…' }}">{{ text|default('', true) }}</textarea>
-                <div class="textarea-footer">
-                  <span class="editor-hint">{{ 'Les longues sections fonctionnent le mieux.' if is_fr else 'Longer sections give more useful context.' }}</span>
-                  <span id="character-count" class="character-count" aria-live="polite">{{ (text|default('', true))|length }} / {{ limits.max_input_chars|default(250000) }}</span>
+                <div class="sample-tools">
+                  <button class="text-button sample-load-button" id="load-example" type="button" data-sample-en="{{ sample_text_en }}" data-sample-fr="{{ sample_text_fr }}" hidden>
+                    <span class="text-button-icon" aria-hidden="true">＋</span>{{ 'Essayer l’exemple fictif' if is_fr else 'Try fictional example' }}
+                  </button>
+                  <details id="copy-sample" class="sample-disclosure">
+                    <summary>{{ 'Copier l’exemple' if is_fr else 'Copy sample text' }}</summary>
+                  <div class="sample-content">
+                    <p>{{ 'Sélectionnez ce texte pour le copier dans le champ.' if is_fr else 'Select this text to copy it into the editor.' }}</p>
+                    <pre lang="{{ selected_content_language }}">{{ sample_text_fr if selected_content_language == 'fr' else sample_text_en }}</pre>
+                  </div>
+                  </details>
                 </div>
               </div>
-              <p id="text-help" class="field-help">{{ 'Limite du texte : ' if is_fr else 'Text limit: ' }}{{ limits.max_input_chars|default(250000) }} {{ 'caractères. Un texte trop long sera refusé ; divisez-le en sections.' if is_fr else 'characters. Longer text is rejected; split it into sections.' }} <span class="engine-note">{{ 'Choisissez la langue du document indépendamment de celle de l’interface.' if is_fr else 'Choose the document language independently from the interface language.' }}</span></p>
+              <div class="textarea-wrap">
+                <textarea id="report-text" name="text" rows="8" lang="{{ selected_content_language }}" autocomplete="off" spellcheck="true" aria-invalid="{{ 'true' if text_error else 'false' }}" aria-describedby="text-help character-count text-error" placeholder="{{ 'Collez un chapitre, un résumé ou une section…' if is_fr else 'Paste a chapter, abstract, or section…' }}">{{ text_value }}</textarea>
+                <div class="textarea-footer">
+                  <span class="editor-hint">{{ 'Maximum :' if is_fr else 'Maximum:' }} {{ max_chars }} {{ 'caractères' if is_fr else 'characters' }}</span>
+                  <span id="character-count" class="character-count">{{ text_value|length }} / {{ max_chars }}</span>
+                  <button class="text-button clear-button" id="clear-text" type="button" disabled hidden>{{ 'Effacer la saisie' if is_fr else 'Clear input' }}</button>
+                </div>
+              </div>
+              <p id="text-help" class="field-help">{{ 'Collez le passage à relire. Un texte trop long sera refusé ; divisez-le en sections.' if is_fr else 'Paste the passage to review. Longer text is rejected; split it into sections.' }}</p>
               <p id="text-error" class="field-error" {% if not text_error %}hidden{% endif %}>{{ text_error or '' }}</p>
 
               <div class="upload-zone">
@@ -106,214 +166,240 @@
                   <span class="upload-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M12 15.5V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4.5 14.5v4A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-4"/></svg>
                   </span>
-                  <span><strong>{{ 'Importer un fichier' if is_fr else 'Upload a document' }}</strong><small>{{ 'Fichier texte UTF-8 · .txt ou .tex' if is_fr else 'UTF-8 text · .txt or .tex' }}</small></span>
+                  <span><label class="upload-title" for="report-file">{{ 'Importer un fichier texte' if is_fr else 'Upload a text file' }}</label><small>{{ 'UTF-8 · .txt ou .tex · maximum ' if is_fr else 'UTF-8 · .txt or .tex · maximum ' }}{{ (max_upload_bytes / 1000000)|round(1) }} {{ 'Mo' if is_fr else 'MB' }}</small></span>
                 </div>
-                <label class="upload-button" for="report-file">{{ 'Parcourir' if is_fr else 'Browse' }}</label>
-                <input class="file-input" id="report-file" name="file" type="file" accept=".txt,.tex,text/plain" aria-invalid="{{ 'true' if file_error else 'false' }}" aria-describedby="file-help file-error" data-file-label-en="Choose a file" data-file-label-fr="Choisir un fichier">
+                <input class="file-input" id="report-file" name="file" type="file" accept=".txt,.tex,text/plain" aria-invalid="{{ 'true' if file_error else 'false' }}" aria-describedby="file-help file-error">
               </div>
               <div class="file-meta-row">
-                <p id="file-help" class="field-help">{{ 'Taille maximale :' if is_fr else 'Maximum file size:' }} {{ (limits.max_upload_bytes|default(10485760) / 1000000)|round(1) }} {{ 'Mo' if is_fr else 'MB' }}</p>
-                <span id="file-name" class="file-name" aria-live="polite"></span>
+                <p id="file-help" class="field-help">{{ 'Le fichier choisi est prioritaire sur le texte collé.' if is_fr else 'A selected file takes precedence over pasted text.' }}</p>
+                <span id="file-name" class="file-name visually-hidden" aria-live="polite"></span>
               </div>
-              <p id="file-error" class="field-error" {% if not file_error %}hidden{% endif %}>{{ file_error or '' }}</p>
+              <div class="file-actions{% if not file_error %} file-actions-empty{% endif %}">
+                <p id="file-error" class="field-error" {% if not file_error %}hidden{% endif %}>{{ file_error or '' }}</p>
+                <button class="text-button remove-file-button" id="remove-file" type="button" hidden>{{ 'Retirer le fichier' if is_fr else 'Remove file' }}</button>
+              </div>
+              <noscript><p class="field-help no-script-file-note">{{ 'Sans JavaScript, rechargez cette page puis collez de nouveau votre brouillon pour revenir au texte collé.' if is_fr else 'Without JavaScript, reload this page and paste your draft again to return to pasted text.' }}</p></noscript>
 
-              <div class="format-row">
-                <label for="source-format">{{ 'Format du texte collé' if is_fr else 'Pasted text format' }}</label>
-                <select id="source-format" name="source_format">
-                  <option value="txt" {% if source_format|default('txt') in ['txt', '.txt'] %}selected{% endif %}>{{ 'Texte brut (.txt)' if is_fr else 'Plain text (.txt)' }}</option>
-                  <option value="tex" {% if source_format|default('txt') in ['tex', '.tex'] %}selected{% endif %}>LaTeX (.tex)</option>
-                </select>
-              </div>
-
-              <div class="sample-row">
-                <button class="text-button" id="load-example" type="button" data-sample-en="This chapter presents a fictional method. This chapter presents a fictional result. This chapter presents a fictional discussion. The results show a made-up increase in this synthetic example." data-sample-fr="Ce chapitre présente une méthode fictive. Ce chapitre présente un résultat fictif. Ce chapitre présente une discussion fictive. Les résultats montrent une hausse inventée dans cet exemple synthétique." hidden>
-                  <span class="text-button-icon" aria-hidden="true">＋</span>{{ 'Charger un exemple fictif' if is_fr else 'Load a synthetic example' }}
-                </button>
-                <button class="text-button clear-button" id="clear-text" type="button" disabled hidden>{{ 'Effacer la saisie' if is_fr else 'Clear input' }}</button>
-              </div>
+              <fieldset class="review-settings">
+                <legend>{{ 'Paramètres de relecture' if is_fr else 'Review settings' }}</legend>
+                <div class="settings-grid">
+                  <div class="setting-field">
+                    <label for="content-language">{{ 'Langue du document' if is_fr else 'Document language' }}</label>
+                    <select id="content-language" name="content_language" aria-describedby="language-help">
+                      <option value="en" {% if selected_content_language == 'en' %}selected{% endif %}>English</option>
+                      <option value="fr" {% if selected_content_language == 'fr' %}selected{% endif %}>Français</option>
+                    </select>
+                    <p id="language-help" class="field-help">{{ 'Indépendante de la langue de l’interface.' if is_fr else 'Independent from the interface language.' }}</p>
+                  </div>
+                  <div class="setting-field">
+                    <label for="source-format">{{ 'Format du texte collé' if is_fr else 'Pasted text format' }}</label>
+                    <select id="source-format" name="source_format">
+                      <option value="txt" {% if source_format|default('txt') in ['txt', '.txt'] %}selected{% endif %}>{{ 'Texte brut (.txt)' if is_fr else 'Plain text (.txt)' }}</option>
+                      <option value="tex" {% if source_format|default('txt') in ['tex', '.tex'] %}selected{% endif %}>LaTeX (.tex)</option>
+                    </select>
+                    <p class="field-help">{{ 'Utilisé seulement si vous collez le texte.' if is_fr else 'Used only when you paste text.' }}</p>
+                  </div>
+                </div>
+              </fieldset>
 
               <div class="form-actions">
                 <button class="button button-primary" type="submit" formaction="/audit" data-loading-label-en="Reviewing…" data-loading-label-fr="Analyse…">
-                  <span class="button-label">{{ 'Analyser les tendances rédactionnelles' if is_fr else 'Review writing patterns' }}</span>
+                  <span class="button-label">{{ 'Relire les motifs rédactionnels' if is_fr else 'Review writing patterns' }}</span>
                   <span class="button-spinner" aria-hidden="true" hidden></span>
                   <svg class="button-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10h12m-4.5-4.5 4.5 4.5-4.5 4.5"/></svg>
                 </button>
                 <button class="button button-secondary" type="submit" formaction="/revise" data-loading-label-en="Preparing…" data-loading-label-fr="Préparation…">
-                  <span class="button-label">{{ 'Prévisualiser les retouches de style' if is_fr else 'Preview style edits' }}</span>
+                  <span class="button-label">{{ 'Prévisualiser les retouches' if is_fr else 'Preview style edits' }}</span>
                   <span class="button-spinner" aria-hidden="true" hidden></span>
                 </button>
               </div>
               <span id="submission-status" class="visually-hidden" role="status" aria-live="polite"></span>
-              <p class="form-footnote">{{ 'Une prévisualisation ne modifie jamais votre fichier source.' if is_fr else 'A preview never changes your source file.' }}</p>
+              <p class="form-footnote">{{ 'La prévisualisation ne modifie pas votre fichier source.' if is_fr else 'The preview does not change your source file.' }}</p>
             </form>
           </section>
 
           <section id="results-panel" class="results-column" aria-labelledby="results-heading">
+            <p id="results-stale" class="results-stale" role="status" aria-live="polite" data-message-en="The text has changed. Submit it again to refresh these results." data-message-fr="Le texte a changé. Soumettez-le à nouveau pour actualiser les résultats." hidden>{{ 'Le texte a changé. Soumettez-le à nouveau pour actualiser les résultats.' if is_fr else 'The text has changed. Submit it again to refresh these results.' }}</p>
             <div class="results-heading-row">
               <div>
-                <div class="card-topline results-kicker"><span class="step-label">{{ 'Votre revue' if is_fr else 'Your review' }}</span></div>
+                <div class="card-topline results-kicker"><span class="step-label">{{ 'Résultats' if is_fr else 'Results' }}</span></div>
                 <h2 id="results-heading" tabindex="-1">{{ 'Notes de lecture' if is_fr else 'Reading notes' }}</h2>
               </div>
               {% if mode == 'audit' and report %}
-                <span class="result-status"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Revue prête' if is_fr else 'Review ready' }}</span>
+                <span class="result-status" data-state="ready"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Revue prête' if is_fr else 'Review ready' }}</span>
               {% elif mode == 'revise' %}
-                <span class="result-status"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Aperçu prêt' if is_fr else 'Preview ready' }}</span>
+                <span class="result-status" data-state="ready"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Aperçu prêt' if is_fr else 'Preview ready' }}</span>
               {% elif error %}
-                <span class="result-status result-status-error"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Corrigez le champ signalé' if is_fr else 'Fix the highlighted field' }}</span>
+                <span class="result-status result-status-error" data-state="error"><span class="result-status-dot" aria-hidden="true"></span>{{ 'Corrigez le champ signalé' if is_fr else 'Check the highlighted field' }}</span>
               {% else %}
-                <span class="result-status result-status-idle"><span class="result-status-dot" aria-hidden="true"></span>{{ 'En attente du texte' if is_fr else 'Waiting for text' }}</span>
+                <span class="result-status result-status-idle" data-state="empty"><span class="result-status-dot" aria-hidden="true"></span>{{ 'En attente du texte' if is_fr else 'Waiting for text' }}</span>
               {% endif %}
             </div>
 
             {% if mode == 'audit' and report %}
-              {% set findings = report.findings|default(public_findings|default([], true), true) %}
-              {% set citation_cues = report.citation_cues|default([], true) %}
-              {% set findings_total = report.findings_total_count|default(findings|length) %}
-              {% set findings_displayed = report.findings_displayed_count|default(findings|length) %}
-              {% set findings_omitted = report.findings_omitted_count|default(0) %}
-              {% set citations_total = report.citation_cues_total_count|default(citation_cues|length) %}
-              {% set citations_omitted = report.citation_cues_omitted_count|default(0) %}
               <article class="report-summary surface-card">
                 <div class="summary-source-row">
                   <div class="source-identity">
                     <span class="file-type-icon" aria-hidden="true">{{ 'TEX' if source_format|default('txt') in ['tex', '.tex'] else 'TXT' }}</span>
                     <div class="source-copy">
                       <p class="eyebrow">{{ 'Source relue' if is_fr else 'Source reviewed' }}</p>
-                      <h3 class="source-name" title="{{ source_name|default('Pasted text') }}">{{ source_name|default('Pasted text') }}</h3>
+                      <h3 class="source-name" data-source-name="{{ source_name_value }}" title="{{ display_source_name }}">{{ display_source_name }}</h3>
                     </div>
                   </div>
                   <span class="coverage-pill">{{ 'Document en français' if selected_content_language == 'fr' and is_fr else 'French document' if selected_content_language == 'fr' else 'Document en anglais' if is_fr else 'English document' }}</span>
                 </div>
-                <dl class="document-stats" aria-label="{{ 'Mesures du document' if is_fr else 'Document counts' }}">
-                  <div class="document-stat"><dt class="stat-label">{{ 'Mots' if is_fr else 'Words' }}</dt><dd class="stat-value"><data value="{{ report.base.word_count }}">{{ report.base.word_count }}</data></dd></div>
-                  <div class="document-stat"><dt class="stat-label">{{ 'Phrases' if is_fr else 'Sentences' }}</dt><dd class="stat-value"><data value="{{ report.base.sentence_count }}">{{ report.base.sentence_count }}</data></dd></div>
-                  <div class="document-stat"><dt class="stat-label">{{ 'Pistes' if is_fr else 'Prompts' }}</dt><dd class="stat-value"><data value="{{ findings_total }}">{{ findings_total }}</data></dd></div>
+                <dl class="document-stats">
+                  <div class="document-stat"><dt>{{ 'Mots' if is_fr else 'Words' }}</dt><dd><data value="{{ report.base.word_count }}">{{ report.base.word_count }}</data></dd></div>
+                  <div class="document-stat"><dt>{{ 'Phrases' if is_fr else 'Sentences' }}</dt><dd><data value="{{ report.base.sentence_count }}">{{ report.base.sentence_count }}</data></dd></div>
+                  <div class="document-stat"><dt>{{ 'Pistes affichées' if is_fr else 'Prompts shown' }}</dt><dd><data value="{{ findings_displayed }}">{{ findings_displayed }}</data></dd></div>
                 </dl>
-                <div class="sample-caveat">
-                  <span class="caveat-icon" aria-hidden="true">i</span>
-                  <p>{{ 'Les indications reposent sur des motifs visibles. Le service ne vérifie ni les faits, ni les références bibliographiques, ni le contenu des sources.' if is_fr else 'Prompts are based on visible patterns. The service does not check factual claims, bibliography entries or source contents.' }}</p>
-                </div>
+                {% if report.base.sentence_count < 4 %}
+                  <p class="sample-caveat">{{ 'Échantillon court : ' ~ report.base.sentence_count ~ ' phrases. Les motifs peuvent changer avec un texte plus long.' if is_fr else 'Short sample: ' ~ report.base.sentence_count ~ ' sentences. Patterns may change with more text.' }}</p>
+                {% endif %}
+                {% if findings_omitted > 0 %}
+                  <p class="count-disclaimer">{{ 'Affichage de ' ~ findings_displayed ~ ' pistes sur ' ~ findings_total ~ ' au total.' if is_fr else 'Showing ' ~ findings_displayed ~ ' of ' ~ findings_total ~ ' total prompts.' }}</p>
+                {% endif %}
               </article>
+
+              <nav class="result-nav" aria-label="{{ 'Sections des résultats' if is_fr else 'Result sections' }}">
+                <a href="#signals-heading"><span>{{ 'Motifs rédactionnels' if is_fr else 'Writing patterns' }}</span><span class="nav-count">{{ public_notes|length }}</span></a>
+                {% if citation_cues %}
+                  <a href="#source-checks-heading"><span>{{ 'Repères de citation' if is_fr else 'Citation cues' }}</span><span class="nav-count">{{ citations_total }}</span></a>
+                {% endif %}
+                <a href="#passages-heading"><span>{{ 'Pistes de relecture' if is_fr else 'Review prompts' }}</span><span class="nav-count">{{ findings_displayed }}{% if findings_omitted > 0 %}<span class="visually-hidden"> {{ 'sur' if is_fr else 'of' }} {{ findings_total }}</span>{% endif %}</span></a>
+              </nav>
 
               <section class="signals-section" aria-labelledby="signals-heading">
                 <div class="section-title-row">
                   <div>
-                    <p class="eyebrow">{{ 'Pistes de relecture' if is_fr else 'Reading prompts' }}</p>
+                    <p class="eyebrow">{{ 'Résumé des règles' if is_fr else 'Rule summary' }}</p>
                     <h3 id="signals-heading">{{ 'Motifs rédactionnels' if is_fr else 'Writing patterns' }}</h3>
                   </div>
-                  <span class="section-count">{{ public_notes|length }} {{ 'notes' if is_fr else 'notes' }}</span>
+                  <span class="section-count">{{ public_notes|length }}</span>
                 </div>
                 {% if public_notes %}
                   <ul class="signal-notes">
                     {% for note in public_notes %}
-                      <li><span class="note-mark" aria-hidden="true">↗</span><span lang="{{ selected_content_language }}">{{ note }}</span></li>
+                      <li><span class="note-mark" aria-hidden="true">•</span><span lang="{{ selected_content_language }}">{{ note }}</span></li>
                     {% endfor %}
                   </ul>
                 {% else %}
-                  <div class="quiet-state"><p>{{ 'Aucune note supplémentaire.' if is_fr else 'No additional notes.' }}</p></div>
+                  <div class="quiet-state"><p>{{ 'Aucun résumé supplémentaire pour cet échantillon.' if is_fr else 'No additional summary for this sample.' }}</p></div>
                 {% endif %}
               </section>
 
               {% if citation_cues %}
-                <section class="content-section" aria-labelledby="source-checks-heading">
+                <section class="content-section citation-section" aria-labelledby="source-checks-heading">
                   <div class="section-title-row">
                     <div><p class="eyebrow">{{ 'Repères visibles' if is_fr else 'Visible references' }}</p><h3 id="source-checks-heading">{{ 'Repères de citation' if is_fr else 'Citation cues' }}</h3></div>
                     <span class="section-count">{{ citations_total }}</span>
                   </div>
-                  <div class="evidence-list">
-                    {% for item in citation_cues %}
-                      <article class="evidence-card">
-                        <h4 class="visually-hidden">{{ 'Repère de citation, ligne' if is_fr else 'Citation cue, line' }} {{ item.line }}</h4>
-                        <div class="evidence-meta"><span class="line-reference">{{ 'Ligne' if is_fr else 'Line' }} {{ item.line }} · {{ 'phrase' if is_fr else 'sentence' }} {{ item.sentence_index }}</span><span class="citation-keys">{{ item.syntax }}</span></div>
-                        {% if item['keys'] %}<p class="evidence-excerpt"><span>{{ 'Référence visible :' if is_fr else 'Visible reference:' }}</span> <span lang="{{ selected_content_language }}">{{ item['keys']|join(', ') }}</span></p>{% endif %}
-                        {% if item.excerpt %}<blockquote lang="{{ selected_content_language }}">{{ item.excerpt }}</blockquote>{% endif %}
-                      </article>
-                    {% endfor %}
-                  </div>
-                  {% if citations_omitted > 0 %}<p class="section-disclaimer">{{ citations_omitted }} {{ 'repères supplémentaires non affichés.' if is_fr else 'additional cues not shown.' }}</p>{% endif %}
-                  <p class="section-disclaimer">{{ 'Un repère visible ne confirme ni l’existence d’une référence ni son adéquation à l’affirmation.' if is_fr else 'A visible cue does not confirm that a reference exists or supports the statement.' }}</p>
+                  <details class="citation-disclosure">
+                    <summary>{{ 'Voir les clés, types et emplacements' if is_fr else 'View keys, types, and locations' }}</summary>
+                    <div class="evidence-list">
+                      {% for item in citation_cues %}
+                        <article class="evidence-card citation-card">
+                          <h4 class="visually-hidden">{{ 'Repère de citation, ligne' if is_fr else 'Citation cue, line' }} {{ item.line }}</h4>
+                          <div class="evidence-meta"><span class="line-reference">{{ 'Ligne' if is_fr else 'Line' }} {{ item.line }} · {{ 'phrase' if is_fr else 'sentence' }} {{ item.sentence_index }}</span><span class="citation-keys">{{ item.syntax }}</span></div>
+                          {% if item['keys'] %}<p class="evidence-excerpt"><span>{{ 'Clés :' if is_fr else 'Keys:' }}</span> <span lang="{{ selected_content_language }}">{{ item['keys']|join(', ') }}</span></p>{% endif %}
+                        </article>
+                      {% endfor %}
+                    </div>
+                    {% if citations_omitted > 0 %}<p class="count-disclaimer">{{ citations_omitted }} {{ 'repères supplémentaires non affichés.' if is_fr else 'additional cues not shown.' }}</p>{% endif %}
+                  </details>
                 </section>
               {% endif %}
 
-              <section class="content-section" aria-labelledby="passages-heading">
+              <section class="content-section prompt-section" aria-labelledby="passages-heading">
                 <div class="section-title-row">
-                  <div><p class="eyebrow">{{ 'Avec leur contexte' if is_fr else 'With context' }}</p><h3 id="passages-heading">{{ 'Pistes de relecture' if is_fr else 'Review prompts' }}</h3></div>
-                  <span class="section-count">{{ findings_total }}</span>
+                  <div><p class="eyebrow">{{ 'Avec leur contexte' if is_fr else 'In context' }}</p><h3 id="passages-heading">{{ 'Pistes de relecture' if is_fr else 'Review prompts' }}</h3></div>
+                  <span class="section-count">{{ findings_displayed }}{% if findings_omitted > 0 %} / {{ findings_total }}{% endif %}</span>
                 </div>
                 {% if findings %}
-                  <div class="evidence-list">
+                  <div id="review-filters" class="review-filters" role="group" aria-label="{{ 'Filtrer les pistes' if is_fr else 'Filter prompts' }}" data-total="{{ findings_total }}" data-displayed="{{ findings_displayed }}" data-writing-displayed="{{ writing_displayed }}" data-source-displayed="{{ source_displayed }}" hidden>
+                    <button type="button" data-review-filter="all" aria-pressed="true">{{ 'Toutes' if is_fr else 'All prompts' }}</button>
+                    <button type="button" data-review-filter="writing" aria-pressed="false">{{ 'Rédaction' if is_fr else 'Writing' }}</button>
+                    <button type="button" data-review-filter="source" aria-pressed="false">{{ 'Sources' if is_fr else 'Source checks' }}</button>
+                  </div>
+                  <p id="filter-status" class="filter-status" role="status" aria-live="polite" hidden></p>
+                  <p id="filter-empty" class="quiet-state filter-empty" hidden>{{ 'Aucune piste dans cette catégorie affichée. Choisissez un autre filtre.' if is_fr else 'No displayed prompts in this category. Choose another filter.' }}</p>
+                  <div class="evidence-list prompt-list">
                     {% for finding in findings %}
-                      <article class="evidence-card">
+                      <article class="evidence-card prompt-card" data-review-category="{{ 'source' if finding.category == 'source' else 'writing' }}">
                         <h4 class="visually-hidden">{{ 'Piste de source, ligne' if is_fr and finding.category == 'source' else 'Piste de relecture, ligne' if is_fr else 'Source prompt, line' if finding.category == 'source' else 'Reading prompt, line' }} {{ finding.line }}</h4>
-                        <div class="evidence-meta"><span class="line-reference">{{ 'Ligne' if is_fr else 'Line' }} {{ finding.line }} · {{ 'phrase' if is_fr else 'sentence' }} {{ finding.sentence_index }}</span><span class="citation-keys">{{ 'Sources' if finding.category == 'source' and is_fr else 'Source context' if finding.category == 'source' else 'Rédaction' if is_fr else 'Writing' }}</span></div>
+                        <div class="evidence-meta"><span class="line-reference">{{ 'Ligne' if is_fr else 'Line' }} {{ finding.line }} · {{ 'phrase' if is_fr else 'sentence' }} {{ finding.sentence_index }}</span><span class="category-tag" data-category="{{ 'source' if finding.category == 'source' else 'writing' }}">{{ 'Sources' if finding.category == 'source' and is_fr else 'Source context' if finding.category == 'source' else 'Rédaction' if is_fr else 'Writing' }}</span></div>
                         <blockquote lang="{{ selected_content_language }}">{{ finding.sentence }}</blockquote>
                         <p class="review-reason" lang="{{ selected_content_language }}">{{ finding.reason }}</p>
                         <p class="review-question"><span>{{ 'À examiner :' if is_fr else 'Consider:' }}</span> <span lang="{{ selected_content_language }}">{{ finding.prompt }}</span></p>
                         {% if finding.phrase %}<p class="evidence-excerpt"><span>{{ 'Formulation :' if is_fr else 'Phrase:' }}</span> <span lang="{{ selected_content_language }}">“{{ finding.phrase }}”</span></p>{% endif %}
                         {% if finding.count %}<p class="field-help">{% if finding.code in ['long_sentence', 'dense_sentence'] %}{{ finding.count }} {{ 'mots' if is_fr else 'words' }}{% else %}{{ finding.count }} {{ 'occurrences' if is_fr else 'occurrences' }}{% endif %}</p>{% endif %}
-                        {% if finding.occurrences|length > 1 %}<p class="field-help">{{ 'Autres lignes :' if is_fr else 'Occurrences on lines:' }} {% for occurrence in finding.occurrences %}{{ occurrence.line }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+                        {% if finding.occurrences|length > 1 %}<p class="field-help">{{ 'Autres lignes :' if is_fr else 'Other lines:' }} {% for occurrence in finding.occurrences %}{{ occurrence.line }}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
                         {% if finding.citation_keys %}<p class="evidence-excerpt"><span>{{ 'Repères :' if is_fr else 'References:' }}</span> <span lang="{{ selected_content_language }}">{{ finding.citation_keys|join(', ') }}</span></p>{% endif %}
                       </article>
                     {% endfor %}
                   </div>
-                  {% if findings_omitted > 0 %}<p class="section-disclaimer">{{ 'Affichage de ' ~ findings_displayed ~ ' pistes sur ' ~ findings_total ~ '.' if is_fr else 'Showing ' ~ findings_displayed ~ ' of ' ~ findings_total ~ ' prompts.' }}</p>{% endif %}
-                  <p class="section-disclaimer">{{ 'Les indications sont des suggestions à examiner dans le texte complet.' if is_fr else 'Prompts are suggestions to consider against the full text.' }}</p>
+                  {% if findings_omitted > 0 %}<p class="count-disclaimer">{{ 'Des pistes supplémentaires ne sont pas affichées.' if is_fr else 'Additional prompts are not shown.' }}</p>{% endif %}
                 {% else %}
-                  <div class="quiet-state"><p>{{ 'Aucune piste ne correspond aux règles activées.' if is_fr else 'No prompts matched the enabled rules.' }}</p></div>
+                  <div class="quiet-state"><p>{{ 'Aucune piste rédactionnelle ou de contrôle de source n’a été relevée dans cet échantillon.' if is_fr else 'No configured writing or source-check prompts were raised for this sample.' }}</p></div>
                 {% endif %}
               </section>
             {% elif mode == 'revise' %}
               <article class="revision-summary surface-card">
                 <div class="summary-source-row">
-                  <div class="source-identity"><span class="file-type-icon" aria-hidden="true">{{ 'TEX' if source_format|default('txt') in ['tex', '.tex'] else 'TXT' }}</span><div class="source-copy"><p class="eyebrow">{{ 'Aperçu seulement' if is_fr else 'Preview only' }}</p><h3 class="source-name" title="{{ source_name|default('Pasted text') }}">{{ source_name|default('Pasted text') }}</h3></div></div>
-                  <span class="coverage-pill"><span class="coverage-dot" aria-hidden="true"></span>{{ edits|length }} {{ 'retouches proposées' if is_fr else 'suggested edits' }}</span>
+                  <div class="source-identity"><span class="file-type-icon" aria-hidden="true">{{ 'TEX' if source_format|default('txt') in ['tex', '.tex'] else 'TXT' }}</span><div class="source-copy"><p class="eyebrow">{{ 'Aperçu de révision' if is_fr else 'Revision preview' }}</p><h3 class="source-name" data-source-name="{{ source_name_value }}" title="{{ display_source_name }}">{{ display_source_name }}</h3></div></div>
+                  <span class="coverage-pill">{{ edits|length }} {{ 'retouches proposées' if is_fr else 'suggested edits' }}</span>
                 </div>
-                <div class="revision-notice"><span aria-hidden="true">↗</span><p>{{ 'Rien n’est écrit dans votre fichier. Relisez les changements avant de reprendre le texte.' if is_fr else 'Nothing is written to your file. Review each change before you use the revised text.' }}</p></div>
+                <p class="revision-notice">{{ 'Rien n’est écrit dans votre fichier. Relisez le texte proposé avant de le reprendre.' if is_fr else 'Nothing is written to your file. Review the suggested text before using it.' }}</p>
               </article>
 
               <section class="content-section" aria-labelledby="changes-heading">
-                <div class="section-title-row"><div><p class="eyebrow">{{ 'Propositions de modification' if is_fr else 'Proposed changes' }}</p><h3 id="changes-heading">{{ 'Lignes modifiées' if is_fr else 'Changed lines' }}</h3></div><span class="section-count">{{ edits|length }}</span></div>
+                <div class="section-title-row"><div><p class="eyebrow">{{ 'Propositions de modification' if is_fr else 'Proposed changes' }}</p><h3 id="changes-heading">{{ 'Comparaison avant / après' if is_fr else 'Before and after' }}</h3></div><span class="section-count">{{ edits|length }}</span></div>
                 {% if edits %}
                   <div class="evidence-list">
                     {% for edit in edits[:20] %}
-                  <article class="edit-card">
-                    <h4 class="visually-hidden">{{ 'Modifications proposées, ligne' if is_fr else 'Suggested edits, line' }} {{ edit.line }}</h4>
+                      <article class="edit-card">
+                        <h4 class="visually-hidden">{{ 'Modifications proposées, ligne' if is_fr else 'Suggested edits, line' }} {{ edit.line }}</h4>
                         <div class="edit-meta"><span class="line-reference">{{ 'Ligne' if is_fr else 'Line' }} {{ edit.line }}</span><span class="edit-reason" lang="{{ selected_content_language }}">{{ edit.reason }}</span></div>
                         <div class="edit-before"><span class="edit-label">{{ 'Avant' if is_fr else 'Before' }}</span><p lang="{{ selected_content_language }}">{{ edit.before }}</p></div>
                         <div class="edit-after"><span class="edit-label">{{ 'Après' if is_fr else 'After' }}</span><p lang="{{ selected_content_language }}">{{ edit.after }}</p></div>
                       </article>
                     {% endfor %}
                   </div>
-                  {% if edits|length > 20 %}<p class="section-disclaimer">{{ 'Les 20 premières retouches sont affichées.' if is_fr else 'Showing the first 20 suggested edits.' }}</p>{% endif %}
+                  {% if edits_omitted|default(0) > 0 %}<p class="count-disclaimer">{{ 'Affichage de ' ~ (edits|length) ~ ' retouches sur ' ~ edits_total ~ '.' if is_fr else 'Showing ' ~ (edits|length) ~ ' of ' ~ edits_total ~ ' suggested edits.' }}</p>{% endif %}
                 {% else %}
-                  <div class="quiet-state"><p>{{ 'Aucune retouche n’a été proposée.' if is_fr else 'No style revisions were suggested.' }}</p></div>
+                  <div class="quiet-state"><p>{{ 'Aucune retouche de style n’a été proposée.' if is_fr else 'No style edits were suggested.' }}</p></div>
                 {% endif %}
               </section>
 
-              {% if edits %}
-                <details class="disclosure-card" open>
-                  <summary><span>{{ 'Différence unifiée · Unified Diff' if is_fr else 'Unified Diff' }}</span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
-                  <div class="disclosure-body"><p class="section-disclaimer">{{ 'Aperçu des différences.' if is_fr else 'Difference preview.' }}</p><pre class="code-preview diff-preview" lang="{{ selected_content_language }}">{{ diff }}</pre><textarea class="download-source" data-download-source="revised" lang="{{ selected_content_language }}" aria-hidden="true" tabindex="-1" readonly>{{ revised_text }}</textarea><button class="button button-tertiary download-button" type="button" data-download="revised" data-source-format="{{ source_format|default('txt') }}" hidden>{{ 'Télécharger le texte révisé' if is_fr else 'Download revised text' }}</button></div>
+              <section class="revised-output-section" aria-labelledby="revised-output-heading">
+                <div class="output-heading">
+                  <div><p class="eyebrow">{{ 'Texte complet proposé' if is_fr else 'Full suggested text' }}</p><h3 id="revised-output-heading">{{ 'Relisez ou copiez le texte' if is_fr else 'Review or copy the text' }}</h3></div>
+                  <button class="button button-secondary download-button" type="button" data-download="revised" data-source-format="{{ source_format|default('txt') }}" hidden>{{ 'Télécharger le texte' if is_fr else 'Download text' }}</button>
+                </div>
+                <label class="visually-hidden" for="revised-output">{{ 'Texte révisé en lecture seule' if is_fr else 'Revised text, read only' }}</label>
+                <textarea id="revised-output" class="revised-output" data-download-source="revised" lang="{{ selected_content_language }}" rows="10" readonly spellcheck="false">{{ revised_text }}</textarea>
+                <p class="field-help">{{ 'Sans JavaScript, sélectionnez le texte ci-dessus pour le copier.' if is_fr else 'Without JavaScript, select the text above to copy it.' }}</p>
+              </section>
+
+              {% if diff %}
+                <details class="disclosure-card diff-disclosure">
+                  <summary><span>{{ 'Différence unifiée · Unified Diff' if is_fr else 'Unified Diff' }}</span></summary>
+                  <div class="disclosure-body"><pre class="code-preview diff-preview" lang="{{ selected_content_language }}">{{ diff }}</pre></div>
                 </details>
               {% endif %}
             {% else %}
               <article class="empty-review surface-card">
-                <div class="empty-illustration" aria-hidden="true">
-                  <span class="illustration-orbit orbit-one"></span><span class="illustration-orbit orbit-two"></span>
-                  <span class="illustration-paper"><span></span><span></span><span></span><i></i></span>
-                  <span class="illustration-lens"><span></span></span>
-                  <span class="illustration-spark spark-one">✳</span><span class="illustration-spark spark-two">·</span>
-                </div>
-                <p class="eyebrow">{{ 'À vous de jouer' if is_fr else 'Your next step' }}</p>
+                <p class="eyebrow">{{ 'Prochaine étape' if is_fr else 'Next step' }}</p>
                 <h3>{{ 'Commencez par un passage.' if is_fr else 'Start with a passage.' }}</h3>
-                <p class="empty-copy">{{ 'Collez un texte ou importez un fichier pour examiner les répétitions, les formulations et les repères de citation visibles.' if is_fr else 'Paste text or upload a file to review repetition, phrasing and visible citation cues.' }}</p>
-                <ol class="empty-checklist"><li>{{ 'Ajoutez votre texte' if is_fr else 'Add your writing' }}</li><li>{{ 'Examinez les indications' if is_fr else 'Review the prompts' }}</li><li>{{ 'Décidez quoi réviser' if is_fr else 'Choose what to revise' }}</li></ol>
-                <p class="empty-disclaimer">{{ 'Les indications sont des suggestions de relecture ; elles ne vérifient ni les faits ni les références.' if is_fr else 'Prompts are editing suggestions; they do not check facts or references.' }}</p>
+                <ul class="empty-guide">
+                  <li><strong>{{ 'Motifs rédactionnels' if is_fr else 'Writing patterns' }}</strong><span>{{ 'Répétitions et passages denses à relire.' if is_fr else 'Repeated wording and dense passages to review.' }}</span></li>
+                  <li><strong>{{ 'Repères de citation' if is_fr else 'Citation cues' }}</strong><span>{{ 'Indices visibles, sans vérification des sources.' if is_fr else 'Visible cues, with no source verification.' }}</span></li>
+                  <li><strong>{{ 'Aperçu de style' if is_fr else 'Style preview' }}</strong><span>{{ 'Propositions séparées du fichier original.' if is_fr else 'Suggestions kept separate from your original file.' }}</span></li>
+                </ul>
               </article>
             {% endif %}
 
             <footer class="results-footer">
-              <span class="footer-rule" aria-hidden="true"></span>
               <p>{{ 'Conçu pour soutenir votre jugement éditorial.' if is_fr else 'Built to support your editorial judgment.' }}</p>
             </footer>
           </section>
@@ -322,7 +408,7 @@
         <footer class="page-footer">
           <span class="footer-brand">r.</span>
           <p>{{ 'Un atelier de lecture et de révision pour le travail académique.' if is_fr else 'A reading and revision desk for academic work.' }}</p>
-          <span>{{ 'Langue du document : français' if selected_content_language == 'fr' and is_fr else 'Document language: French' if selected_content_language == 'fr' else 'Langue du document : anglais' if is_fr else 'Document language: English' }}</span>
+          <span>{{ 'Anglais / français · UTF-8 .txt / .tex' if is_fr else 'English / French · UTF-8 .txt / .tex' }}</span>
         </footer>
       </main>
     </div>
