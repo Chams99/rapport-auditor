@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 from conftest import LOCAL_ORIGIN, form_csrf_token
+from rapport_auditor.review import audit_text
 
 
 def post_form(client, path: str, values: dict[str, object]):
@@ -37,6 +39,33 @@ def test_paste_audit_returns_metrics(client):
     assert b"Words" in response.data
     assert b"Writing patterns" in response.data
     assert b"does not check factual claims, bibliography entries or source contents" in response.data
+
+
+def test_french_native_audit_renders_the_localized_citation_prompt(client):
+    text = "Les résultats montrent une amélioration fictive (Martin, 2024)."
+    report = audit_text(text, content_language="fr", source_format="txt")
+    expected_prompt = next(
+        finding.prompt for finding in report.findings if finding.code == "citation_context_prompt"
+    )
+
+    response = post_form(
+        client,
+        "/audit",
+        {
+            "text": text,
+            "source_format": "txt",
+            "content_language": "fr",
+            "locale": "fr",
+        },
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert expected_prompt.encode("utf-8") in response.data
+    assert "Check that the cited work supports this specific statement" not in response.get_data(as_text=True)
+
+    smoke_script = Path(__file__).resolve().parents[1] / "scripts" / "release_http_smoke.py"
+    smoke_source = smoke_script.read_text(encoding="utf-8")
+    assert "Vérifiez que la source citée étaye bien cette affirmation précise" in smoke_source
 
 
 def test_tex_upload_audit_works(client):

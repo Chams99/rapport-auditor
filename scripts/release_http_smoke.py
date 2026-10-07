@@ -100,6 +100,6 @@ response = request(
 native_result = response.read().decode("utf-8")
 assert response.status == 200
 assert 'id="results-heading"' in native_result
-assert "Check that the cited work supports this specific statement" in native_result
+assert "Vérifiez que la source citée étaye bien cette affirmation précise" in native_result
 
 print("Verified HTTPS origin, security headers, health/readiness, and synthetic bilingual API/native-form flows.")
