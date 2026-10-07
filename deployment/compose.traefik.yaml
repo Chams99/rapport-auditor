@@ -28,7 +28,7 @@ services:
       RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS: "60"
       RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS: "4096"
       RAPPORT_AUDITOR_REDIS_TIMEOUT_SECONDS: "0.5"
-      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "2"
+      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "${RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS:-2}"
       RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS: "10"
       RAPPORT_AUDITOR_WORKER_MEMORY_MB: "512"
       RAPPORT_AUDITOR_WORKER_CPU_SECONDS: "8"
@@ -67,7 +67,10 @@ services:
       traefik.http.routers.rapport-auditor.tls: "true"
       traefik.http.routers.rapport-auditor.tls.certresolver: myresolver
       traefik.http.routers.rapport-auditor.service: rapport-auditor
-      traefik.http.routers.rapport-auditor.middlewares: rapport-auditor-inflight,rapport-auditor-request-cap,default-chain@file
+      traefik.http.routers.rapport-auditor.middlewares: rapport-auditor-inflight,rapport-auditor-request-cap
+      traefik.http.routers.rapport-auditor.observability.accesslogs: "false"
+      traefik.http.routers.rapport-auditor.observability.tracing: "false"
+      traefik.http.routers.rapport-auditor.observability.metrics: "false"
       traefik.http.services.rapport-auditor.loadbalancer.server.port: "5000"
       traefik.http.services.rapport-auditor.loadbalancer.healthcheck.path: /api/v1/health/ready
       traefik.http.services.rapport-auditor.loadbalancer.healthcheck.hostname: ${RAPPORT_AUDITOR_PUBLIC_DOMAIN:?Set RAPPORT_AUDITOR_PUBLIC_DOMAIN in deployment/.env.traefik}
