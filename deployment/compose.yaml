@@ -1,0 +1,193 @@
+name: rapport-auditor
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    init: true
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    expose:
+      - "5000"
+    environment:
+      RAPPORT_AUDITOR_MODE: server
+      RAPPORT_AUDITOR_HOST: 0.0.0.0
+      RAPPORT_AUDITOR_PORT: "5000"
+      RAPPORT_AUDITOR_THREADS: "4"
+      RAPPORT_AUDITOR_SECRET_KEY_FILE: /run/secrets/rapport_secret_key
+      RAPPORT_AUDITOR_TRUSTED_HOSTS: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in deployment/.env}
+      RAPPORT_AUDITOR_TRUSTED_ORIGINS: https://${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in deployment/.env}
+      RAPPORT_AUDITOR_TRUSTED_PROXY: 10.89.0.2
+      RAPPORT_AUDITOR_REDIS_URL: redis://redis:6379/0
+      RAPPORT_AUDITOR_RATE_LIMIT_NAMESPACE: rapport-auditor:public:v1
+      RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS: "30"
+      RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS: "60"
+      RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS: "4096"
+      RAPPORT_AUDITOR_REDIS_TIMEOUT_SECONDS: "0.5"
+      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "2"
+      RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS: "10"
+      RAPPORT_AUDITOR_WORKER_MEMORY_MB: "512"
+      RAPPORT_AUDITOR_WORKER_CPU_SECONDS: "8"
+    secrets:
+      - source: auditor_secret
+        target: rapport_secret_key
+    networks:
+      app_net:
+        ipv4_address: 10.89.0.3
+      redis_net:
+        ipv4_address: 10.90.0.2
+    depends_on:
+      redis:
+        condition: service_healthy
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 32
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request; u='http://127.0.0.1:5000/api/v1/health/ready'; h=os.environ['RAPPORT_AUDITOR_TRUSTED_HOSTS'].split(',')[0]; urllib.request.urlopen(urllib.request.Request(u,headers={'Host':h}),timeout=2).read()"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    restart: unless-stopped
+    user: "999:1000"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - ""
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - redis_rate_state:/data
+    networks:
+      redis_net:
+        ipv4_address: 10.90.0.3
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 32
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy:
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN in deployment/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      edge_net: {}
+      app_net:
+        ipv4_address: 10.89.0.2
+    depends_on:
+      caddy-storage-init:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy-storage-init:
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 1000:1000 /data /config"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    network_mode: none
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 8
+    restart: "no"
+
+volumes:
+  redis_rate_state:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge_net:
+  app_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24
+  redis_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+
+secrets:
+  auditor_secret:
+    file: ${RAPPORT_AUDITOR_SECRET_FILE:?Set RAPPORT_AUDITOR_SECRET_FILE in deployment/.env}

@@ -1,0 +1,5 @@
+SYNTHETIC TEST TEXT — NO REAL RESEARCH OR MEASURED RESULTS.
+
+This sample describes a fictional local writing tool for testing the review interface. It handles a short chapter and keeps the writer in control of every edit. The example contains no real study, institution, participant, or outcome.
+
+The writer should check claims against the sources they used. A paragraph can be clear and still need a citation. Review each suggestion in context before copying it into a report.

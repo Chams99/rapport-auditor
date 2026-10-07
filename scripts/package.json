@@ -1,0 +1,13 @@
+{
+  "name": "rapport-auditor-browser-checks",
+  "private": true,
+  "description": "Optional real-browser and accessibility smoke checks for the Flask app",
+  "scripts": {
+    "install:browsers": "playwright install chromium",
+    "test:browser": "node browser_smoke.cjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "playwright": "1.62.1"
+  }
+}
