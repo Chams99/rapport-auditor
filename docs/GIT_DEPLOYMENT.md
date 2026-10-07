@@ -1,6 +1,6 @@
 # Private GitHub repository and manual VPS updates
 
-Rapport Auditor is in the private repository `Chams99/rapport-auditor`. If the VPS already has a GitHub account SSH identity that can read this repository, use it; no new key setup is needed. A deploy key attached only to the portfolio repository cannot read this one. The optional repository-scoped read-only key below is only for a VPS without another authorized GitHub identity. There is no GitHub Actions workflow or automatic deployment: publishing a change and updating the VPS are separate, manual steps.
+Rapport Auditor is in the private repository `Chams99/rapport-auditor`. If the VPS already has GitHub access for this repository through its account SSH identity or HTTPS credential helper, use it; no new key setup is needed. A deploy key attached only to the portfolio repository cannot read this one. The optional repository-scoped read-only key below is only for a VPS without another authorized GitHub identity. There is no GitHub Actions workflow or automatic deployment: publishing a change and updating the VPS are separate, manual steps.
 
 This candidate has no `LICENSE`/`COPYING` file or license metadata. Keep it private and do not infer public redistribution rights from the GitHub repository.
 
@@ -8,21 +8,23 @@ This candidate has no `LICENSE`/`COPYING` file or license metadata. Keep it priv
 
 Before starting the app, the operator must configure the persistent internal Traefik network and fixed peer address, set the exact `RAPPORT_AUDITOR_TRUSTED_PROXY`, choose `RAPPORT_AUDITOR_APP_MEMORY_LIMIT` and `RAPPORT_AUDITOR_APP_CPU_LIMIT` from measured VPS capacity, and create the private secret at the path in `deployment/.env.traefik`. Complete the DNS, forwarding-header, timeout, access-log, and capacity checks in [the co-hosting runbook](COHOSTING.md). These are one-time host setup steps; they cannot be filled with guessed values.
 
-If the VPS's existing GitHub SSH identity has read access, run this in its normal shell. From Windows PowerShell, connect first:
+Use an already authorized GitHub SSH identity or HTTPS credential helper for this private repository. From Windows PowerShell, connect first:
 
 ```powershell
 ssh my-vps
 ```
 
-At the VPS shell, clone the reviewed initial commit, verify the pin, then apply the separate Rapport Compose project:
+At the VPS shell, clone the private repository on first setup using its existing authorized authentication method. Set `REVIEWED_SHA` to the immutable commit SHA approved for the initial release, then verify the pin before applying the separate Rapport Compose project. For later updates, use the existing clone and the update steps below.
 
 ```sh
 mkdir -p "$HOME/services"
-git clone git@github.com:Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
+git clone https://github.com/Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
 cd "$HOME/services/rapport-auditor"
 git fetch origin main --prune
-git switch --detach f68bde82fd80fa7ffffc76842126a66b2af4ccf7
-test "$(git rev-parse HEAD)" = f68bde82fd80fa7ffffc76842126a66b2af4ccf7
+REVIEWED_SHA=replace-with-reviewed-release-commit-sha
+git cat-file -e "$REVIEWED_SHA^{commit}"
+git switch --detach "$REVIEWED_SHA"
+test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
 docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml config --quiet
 docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml build app
 docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml up -d
