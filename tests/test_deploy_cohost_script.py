@@ -32,7 +32,7 @@ def _fixture_repo(root: Path) -> tuple[Path, Path, Path]:
     script = root / "scripts" / "deploy_cohost.sh"
     shutil.copy2(SCRIPT, script)
     (root / "scripts" / "prepare_traefik_ingress.py").write_text("", encoding="utf-8")
-    (root / "scripts" / "container_smoke.py").write_text("", encoding="utf-8")
+    (root / "scripts" / "container_smoke.py").write_text("synthetic container smoke source\n", encoding="utf-8")
     (root / "scripts" / "release_http_smoke.py").write_text("", encoding="utf-8")
     example = root / "deployment" / ".env.traefik.example"
     example.write_text(
@@ -69,6 +69,9 @@ esac
         """#!/bin/sh
 printf 'docker %s\\n' "$*" >> "$EVENT_LOG"
 if [ "$1" = compose ]; then
+  case "$*" in
+    *"exec -T app sh -c"*) cat > "$SMOKE_CAPTURE" ;;
+  esac
   if [ "${RAPPORT_AUDITOR_PUBLIC_DOMAIN+x}" = x ] ||
      [ "${RAPPORT_AUDITOR_INGRESS_NETWORK+x}" = x ] ||
      [ "${RAPPORT_AUDITOR_TRUSTED_PROXY+x}" = x ] ||
@@ -109,6 +112,7 @@ def _run_wrapper(script: Path, log: Path, bin_dir: Path, **extra_env: str) -> su
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "EVENT_LOG": str(log),
             "LEAK_FILE": str(log.parent / "compose-env-leak"),
+            "SMOKE_CAPTURE": str(log.parent / "container-smoke-input.py"),
             "REAL_PYTHON": sys.executable,
             **extra_env,
         }
@@ -145,7 +149,9 @@ def test_wrapper_validates_private_values_and_unsets_shell_overrides(tmp_path: P
     assert any("config --quiet" in event for event in events)
     assert any("build app" in event for event in events)
     assert any("up -d" in event for event in events)
-    assert any("exec -T app python /tmp/rapport-container-smoke.py" in event for event in events)
+    assert any("exec -T app sh -c cat > /tmp/rapport-container-smoke.py" in event for event in events)
+    assert not any(" compose cp " in f" {event} " for event in events)
+    assert (log.parent / "container-smoke-input.py").read_text(encoding="utf-8") == "synthetic container smoke source\n"
     assert events[-1] == "python scripts/release_http_smoke.py"
     env_file = repo / "deployment" / ".env.traefik"
     secret_file = repo / "deployment" / "secrets" / "rapport_secret_key"
@@ -192,5 +198,26 @@ def test_wrapper_bash_syntax_and_safe_command_order():
     assert source.index('"${COMPOSE[@]}" build app') < source.index('"${COMPOSE[@]}" up -d')
     assert "RAPPORT_AUDITOR_APP_MEMORY_LIMIT\": \"2g\"" in source
     assert "RAPPORT_AUDITOR_APP_CPU_LIMIT\": \"2.0\"" in source
+    assert "exec -T app sh -c 'cat > /tmp/rapport-container-smoke.py && exec python /tmp/rapport-container-smoke.py'" in source
+    assert " < scripts/container_smoke.py" in source
+    assert '"${COMPOSE[@]}" cp scripts/container_smoke.py' not in source
     assert "docker compose config\n" not in source
     assert not any(token in source for token in ("down --volumes", "system prune", "volume prune"))
+
+
+def test_standalone_release_gate_streams_smoke_into_readonly_container_tmpfs():
+    bash = _bash_executable()
+    if not bash:
+        pytest.skip("bash is unavailable")
+    release_script = REPO / "scripts" / "verify_release.sh"
+    syntax = subprocess.run([bash, "-n", str(release_script)], text=True, capture_output=True, check=False)
+    assert syntax.returncode == 0, syntax.stderr
+
+    source = release_script.read_text(encoding="utf-8")
+    stream_command = "exec -T app sh -c 'cat > /tmp/rapport-container-smoke.py && exec python /tmp/rapport-container-smoke.py'"
+    assert stream_command in source
+    assert "< scripts/container_smoke.py" in source
+    assert '"${COMPOSE[@]}" cp scripts/container_smoke.py' not in source
+    assert source.index("build app") < source.index(stream_command)
+    assert source.index(stream_command) < source.index('"${COMPOSE[@]}" stop redis')
+    assert source.index('"${COMPOSE[@]}" stop redis') < source.index("--expect-redis-outage")
