@@ -149,19 +149,23 @@ def _run(args, timeout=8):
 def _states(ids):
     fmt = (
         "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.State.OOMKilled}}|"
-        "{{.RestartCount}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|"
+        "{{.RestartCount}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCPUs}}|"
         '{{range .Config.Env}}{{if eq . "RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS=2"}}workers2{{end}}{{end}}'
     )
     states = {}
     for role, container_id in ids.items():
         value = _run(["docker", "inspect", "--format", fmt, container_id])
-        fields = value.split("|") if value else []
-        if len(fields) != 7 or fields[2] not in {"true", "false"}:
-            raise RuntimeError("selected container metadata was unavailable")
+        if value is None:
+            raise RuntimeError(f"{role}: inspect_failed")
+        fields = value.split("|")
+        if len(fields) != 7:
+            raise RuntimeError(f"{role}: field_count")
+        if fields[2] not in {"true", "false"}:
+            raise RuntimeError(f"{role}: invalid_boolean")
         try:
             restarts, memory, cpus = map(int, fields[3:6])
         except ValueError as exc:
-            raise RuntimeError("selected container limits were unavailable") from exc
+            raise RuntimeError(f"{role}: invalid_numeric_metadata") from exc
         states[role] = (fields[0], fields[1], fields[2] == "true", restarts, memory, cpus, fields[6] == "workers2")
     return states
 

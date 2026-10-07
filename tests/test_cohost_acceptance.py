@@ -5,6 +5,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "cohost_acceptance.py"
 SPEC = importlib.util.spec_from_file_location("cohost_acceptance", SCRIPT)
@@ -129,14 +131,45 @@ def test_container_metadata_uses_only_worker_sentinel_and_preserves_restart_base
         "redis-id": "running|healthy|false|3|268435456|500000000|",
         "traefik-id": "running|none|false|7|536870912|1000000000|",
     }
-    monkeypatch.setattr(acceptance, "_run", lambda args: records[args[-1]])
+    formats = []
+
+    def fake_run(args):
+        formats.append(args[3])
+        return records[args[-1]]
+
+    monkeypatch.setattr(acceptance, "_run", fake_run)
 
     states = acceptance._states({"app": "app-id", "redis": "redis-id", "traefik": "traefik-id"})
 
+    # Docker's typed inspect model spells this Go field NanoCPUs. A casing
+    # mismatch falls back to raw JSON, where Traefik's omitted Health field
+    # fails under the CLI's strict missing-key template mode.
+    assert all(".HostConfig.NanoCPUs" in fmt for fmt in formats)
+    assert all("{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}" in fmt for fmt in formats)
     assert states["app"][3:] == (5, 2147483648, 2000000000, True)
     assert states["redis"][3] == 3
+    assert states["traefik"][1] == "none"  # no healthcheck is valid
     assert capsys.readouterr().out == ""
 
     records["app-id"] = "running|healthy|false|5|2147483648|2000000000|not-worker2"
     states = acceptance._states({"app": "app-id", "redis": "redis-id", "traefik": "traefik-id"})
     assert states["app"][6] is False
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    (
+        (None, "inspect_failed"),
+        ("private-field-value", "field_count"),
+        ("running|none|unknown|0|1|1|", "invalid_boolean"),
+        ("running|none|false|unknown|1|1|", "invalid_numeric_metadata"),
+    ),
+)
+def test_state_diagnostics_report_only_role_and_constant_reason(monkeypatch, value, reason) -> None:
+    monkeypatch.setattr(acceptance, "_run", lambda _args: value)
+
+    with pytest.raises(RuntimeError) as error:
+        acceptance._states({"traefik": "synthetic-id"})
+
+    assert str(error.value) == f"traefik: {reason}"
+    assert "private-field-value" not in str(error.value)
