@@ -50,6 +50,7 @@ class FakeDocker:
         }
         self.implicit_config = "none"
         self.overlap = False
+        self.foreign_route = False
         self.extra_merged_change = False
         self.digests = [helper.IMAGE_DIGEST]
         self.fail_network_create_once = False
@@ -86,10 +87,20 @@ class FakeDocker:
                 self.fail_network_create_once = False
                 return self._result(args, "", 1)
             self.networks[helper.NETWORK] = {
+                "Id": "e" * 64,
                 "Name": helper.NETWORK,
                 "Driver": "bridge",
                 "Internal": True,
-                "IPAM": {"Config": [{"Subnet": str(helper.SUBNET), "IPRange": str(helper.IP_RANGE)}]},
+                "Options": {"com.docker.network.bridge.name": "br-rapport"},
+                "IPAM": {
+                    "Config": [
+                        {
+                            "Subnet": str(helper.SUBNET),
+                            "IPRange": str(helper.IP_RANGE),
+                            "Gateway": "172.27.0.1",
+                        }
+                    ]
+                },
                 "Containers": {},
             }
             return self._result(args, "new-network-id")
@@ -108,7 +119,14 @@ class FakeDocker:
             if self.overlap:
                 route = "172.27.0.0/24 dev vpn0 table 100 scope link\n"
             elif helper.NETWORK in self.networks:
-                route = f"{helper.SUBNET} dev br-rapport table main scope link\n"
+                route = (
+                    f"{helper.SUBNET} dev br-rapport proto kernel scope link src 172.27.0.1\n"
+                    "broadcast 172.27.0.0 dev br-rapport proto kernel scope link src 172.27.0.1\n"
+                    "local 172.27.0.1 dev br-rapport table local proto kernel scope host src 172.27.0.1\n"
+                    "broadcast 172.27.0.255 dev br-rapport table local proto kernel scope link src 172.27.0.1\n"
+                )
+                if self.foreign_route:
+                    route += "172.27.0.99/32 dev vpn0 proto static scope link\n"
             else:
                 route = "10.0.0.0/8 dev vpn0 table 100 scope link\n"
             return self._result(args, "default via 192.0.2.1 dev eth0\n" + route)
@@ -133,7 +151,11 @@ def test_prepare_writes_only_additive_override_and_connects_exact_peer(fake_dock
     assert helper.OVERRIDE.read_text(encoding="utf-8") == helper.OVERRIDE_TEXT
     assert f"traefik_peer={helper.PEER}" in report
     assert "traefik_restarted=false" in report
-    assert any(command[:3] == ["docker", "network", "create"] for command in fake_docker.commands)
+    create_command = next(
+        command for command in fake_docker.commands if command[:3] == ["docker", "network", "create"]
+    )
+    gateway_index = create_command.index("--gateway")
+    assert create_command[gateway_index : gateway_index + 2] == ["--gateway", "172.27.0.1"]
     assert any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
     assert not any(command[-1:] == ["up"] or "restart" in command for command in fake_docker.commands)
     assert "synthetic secret stderr" not in report
@@ -222,11 +244,23 @@ def test_prepare_aborts_if_merged_compose_has_any_other_delta(fake_docker):
 def test_prepare_aborts_on_route_overlap_before_writing_override(fake_docker):
     fake_docker.overlap = True
 
-    with pytest.raises(helper.PreflightError, match="overlaps an IPv4 route"):
+    with pytest.raises(helper.PreflightError, match="unrecognized IPv4 route"):
         helper.prepare(fake_docker)
 
     assert not helper.OVERRIDE.exists()
     assert helper.NETWORK not in fake_docker.networks
+
+
+def test_prepare_allows_only_owned_bridge_routes_on_rerun(fake_docker):
+    helper.prepare(fake_docker)
+    fake_docker.foreign_route = True
+    fake_docker.commands.clear()
+
+    with pytest.raises(helper.PreflightError, match="unrecognized IPv4 route"):
+        helper.prepare(fake_docker)
+
+    assert not any(command[:3] == ["docker", "network", "create"] for command in fake_docker.commands)
+    assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
 
 
 def test_prepare_leaves_conflicting_owner_override_untouched(fake_docker):
@@ -256,10 +290,20 @@ def test_prepare_aborts_on_owner_identity_or_digest_mismatch(fake_docker):
 
 def test_prepare_aborts_on_existing_network_with_wrong_pool_or_peer(fake_docker):
     fake_docker.networks[helper.NETWORK] = {
+        "Id": "e" * 64,
         "Name": helper.NETWORK,
         "Driver": "bridge",
         "Internal": True,
-        "IPAM": {"Config": [{"Subnet": str(helper.SUBNET), "IPRange": "172.27.0.0/25"}]},
+        "Options": {"com.docker.network.bridge.name": "br-rapport"},
+        "IPAM": {
+            "Config": [
+                {
+                    "Subnet": str(helper.SUBNET),
+                    "IPRange": "172.27.0.0/25",
+                    "Gateway": "172.27.0.1",
+                }
+            ]
+        },
         "Containers": {},
     }
     with pytest.raises(helper.PreflightError, match="dynamic pool"):
@@ -274,6 +318,32 @@ def test_prepare_aborts_on_existing_network_with_wrong_pool_or_peer(fake_docker)
     with pytest.raises(helper.PreflightError, match="stale or unexpected peer"):
         helper.prepare(fake_docker)
     assert not helper.OVERRIDE.exists()
+
+
+def test_prepare_rejects_existing_gateway_reserved_for_traefik_peer(fake_docker):
+    fake_docker.networks[helper.NETWORK] = {
+        "Id": "e" * 64,
+        "Name": helper.NETWORK,
+        "Driver": "bridge",
+        "Internal": True,
+        "Options": {"com.docker.network.bridge.name": "br-rapport"},
+        "IPAM": {
+            "Config": [
+                {
+                    "Subnet": str(helper.SUBNET),
+                    "IPRange": str(helper.IP_RANGE),
+                    "Gateway": "172.27.0.2",
+                }
+            ]
+        },
+        "Containers": {},
+    }
+
+    with pytest.raises(helper.PreflightError, match="gateway conflicts"):
+        helper.prepare(fake_docker)
+
+    assert not helper.OVERRIDE.exists()
+    assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
 
 
 def test_prepare_can_resume_after_network_create_fails(fake_docker):
@@ -296,3 +366,46 @@ def test_merge_validator_rejects_removed_existing_network(fake_docker):
 
     with pytest.raises(helper.PreflightError, match="changes more than"):
         helper._validate_merge(fake_docker.base, expected)
+
+
+def test_merge_validator_normalizes_only_absent_or_empty_compose_ipam(fake_docker):
+    merged = json.loads(json.dumps(fake_docker.base))
+    merged["services"]["traefik"]["image"] = helper.IMAGE_DIGEST
+    merged["services"]["traefik"]["networks"][helper.NETWORK] = {
+        "ipv4_address": str(helper.PEER)
+    }
+    merged["networks"][helper.NETWORK] = {
+        "name": helper.NETWORK,
+        "external": True,
+        "ipam": {},
+    }
+    helper._validate_merge(fake_docker.base, merged)
+
+    del merged["networks"][helper.NETWORK]["ipam"]
+    helper._validate_merge(fake_docker.base, merged)
+
+    merged["networks"][helper.NETWORK]["ipam"] = {"config": []}
+    with pytest.raises(helper.PreflightError, match="changes more than"):
+        helper._validate_merge(fake_docker.base, merged)
+
+    merged["networks"][helper.NETWORK]["ipam"] = {}
+    merged["networks"][helper.NETWORK]["driver"] = "bridge"
+    with pytest.raises(helper.PreflightError, match="changes more than"):
+        helper._validate_merge(fake_docker.base, merged)
+
+
+def test_merge_mismatch_summary_shows_only_safe_structure(fake_docker):
+    expected = helper._expected_merged(fake_docker.base)
+    actual = json.loads(json.dumps(expected))
+    actual["networks"][helper.NETWORK]["ipam"] = {"sensitive": "network-secret-value"}
+    actual["services"]["traefik"]["environment"] = {"API_TOKEN": "environment-secret-value"}
+    actual["services"]["traefik"]["command"] = ["command-secret-value"]
+
+    with pytest.raises(helper.PreflightError) as exc_info:
+        helper._validate_merge(fake_docker.base, actual)
+
+    output = str(exc_info.value)
+    assert "networks.rapport-auditor-ingress.ipam" in output
+    assert "services.traefik" in output
+    for private_value in ("network-secret-value", "environment-secret-value", "command-secret-value", "API_TOKEN", "sensitive"):
+        assert private_value not in output

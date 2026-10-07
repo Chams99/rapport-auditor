@@ -219,13 +219,108 @@ def _expected_merged(base: dict[str, Any]) -> dict[str, Any]:
         raise PreflightError("The dedicated Rapport network already appears in the owner Compose model.")
     service["image"] = IMAGE_DIGEST
     service_networks[NETWORK] = {"ipv4_address": str(PEER)}
-    networks[NETWORK] = {"name": NETWORK, "external": True}
+    # Compose's JSON canonical form materializes the empty IPAM struct for this external network.
+    networks[NETWORK] = {"name": NETWORK, "external": True, "ipam": {}}
     return expected
 
 
+def _shape_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "other"
+
+
+def _safe_shape(path: str, expected: Any, actual: Any, allowed: set[str]) -> str:
+    if not isinstance(expected, dict) or not isinstance(actual, dict):
+        return f"{path}: types={_shape_type(expected)},{_shape_type(actual)}"
+    e_keys = sorted(key for key in expected if key in allowed)
+    a_keys = sorted(key for key in actual if key in allowed)
+    e_other = sum(key not in allowed for key in expected)
+    a_other = sum(key not in allowed for key in actual)
+    details = [
+        f"{path}: expected_fields={','.join(e_keys) or 'none'} "
+        f"actual_fields={','.join(a_keys) or 'none'} other_counts={e_other},{a_other}"
+    ]
+    for key in sorted((set(expected) | set(actual)) & allowed):
+        if key not in expected or key not in actual:
+            details.append(f"{key}_present={key in expected},{key in actual}")
+        elif expected[key] != actual[key]:
+            if key == "ipam" and isinstance(expected[key], dict) and isinstance(actual[key], dict):
+                details.append(
+                    f"{path}.ipam: expected_empty={not expected[key]} actual_empty={not actual[key]}"
+                )
+            else:
+                details.append(f"{key}_types={_shape_type(expected[key])},{_shape_type(actual[key])};equal=false")
+    return ";".join(details)
+
+
+def _merge_shape_summary(expected: dict[str, Any], actual: dict[str, Any]) -> str:
+    changed_sections = [
+        key for key in ("services", "networks", "volumes", "secrets", "configs", "models")
+        if expected.get(key) != actual.get(key)
+    ]
+    lines = [
+        "changed_sections=" + ",".join(changed_sections or ["none"])
+    ]
+    e_services, a_services = expected.get("services"), actual.get("services")
+    e_networks, a_networks = expected.get("networks"), actual.get("networks")
+    lines.append(
+        f"maps: services={_shape_type(e_services)}/{_shape_type(a_services)} "
+        f"counts={len(e_services) if isinstance(e_services, dict) else 'n/a'},{len(a_services) if isinstance(a_services, dict) else 'n/a'}; "
+        f"networks={_shape_type(e_networks)}/{_shape_type(a_networks)} "
+        f"rapport_present={isinstance(a_networks, dict) and NETWORK in a_networks}"
+    )
+    e_service = e_services.get(CONTAINER) if isinstance(e_services, dict) else None
+    a_service = a_services.get(CONTAINER) if isinstance(a_services, dict) else None
+    lines.append(_safe_shape("services.traefik", e_service, a_service, {"image", "networks"}))
+    if isinstance(e_service, dict) and isinstance(a_service, dict):
+        e_sn, a_sn = e_service.get("networks"), a_service.get("networks")
+        lines.append(
+            "services.traefik.networks: "
+            f"types={_shape_type(e_sn)},{_shape_type(a_sn)} "
+            f"rapport_present={isinstance(a_sn, dict) and NETWORK in a_sn}"
+        )
+        if isinstance(e_sn, dict) and isinstance(a_sn, dict):
+            lines.append(_safe_shape(
+                f"services.traefik.networks.{NETWORK}", e_sn.get(NETWORK), a_sn.get(NETWORK),
+                {"ipv4_address", "ipv6_address", "aliases", "link_local_ips", "priority", "gw_priority", "interface_name", "mac_address"},
+            ))
+    if isinstance(e_networks, dict) and isinstance(a_networks, dict):
+        lines.append(f"networks.traefik_definition_equal={e_networks.get('traefik') == a_networks.get('traefik')}")
+        lines.append(_safe_shape(
+            f"networks.{NETWORK}", e_networks.get(NETWORK), a_networks.get(NETWORK),
+            {"name", "external", "driver", "internal", "attachable", "enable_ipv4", "enable_ipv6", "ipam"},
+        ))
+    return " | ".join(lines)
+
+
+def _normalize_compose_model(model: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(model)
+    networks = normalized.get("networks")
+    target_network = networks.get(NETWORK) if isinstance(networks, dict) else None
+    if isinstance(target_network, dict) and target_network.get("ipam") == {}:
+        target_network.pop("ipam")
+    return normalized
+
+
 def _validate_merge(base: dict[str, Any], merged: dict[str, Any]) -> None:
-    if merged != _expected_merged(base):
-        raise PreflightError("The proposed override changes more than the Traefik image pin and Rapport network.")
+    expected = _expected_merged(base)
+    if _normalize_compose_model(merged) != _normalize_compose_model(expected):
+        raise PreflightError(
+            "The proposed override changes more than the Traefik image pin and Rapport network.\n"
+            "Safe Compose structure summary (no values or arbitrary keys shown):\n"
+            f"{_merge_shape_summary(expected, merged)}"
+        )
 
 
 def _network_model(name: str, runner: Runner) -> dict[str, Any]:
@@ -249,6 +344,64 @@ def _network_subnets(network: dict[str, Any]) -> list[ipaddress.IPv4Network | ip
         raise PreflightError("A Docker network subnet was invalid.") from exc
 
 
+def _bridge_route_identity(network: dict[str, Any]) -> tuple[str, ipaddress.IPv4Address]:
+    config = _network_config(network)[0]
+    try:
+        gateway = ipaddress.IPv4Address(config.get("Gateway", ""))
+    except ipaddress.AddressValueError as exc:
+        raise PreflightError("The dedicated network gateway could not be validated.") from exc
+    expected_gateway = SUBNET.network_address + 1
+    if gateway != expected_gateway:
+        raise PreflightError("The dedicated network gateway conflicts with the reserved Traefik peer plan.")
+    options = network.get("Options")
+    bridge = options.get("com.docker.network.bridge.name") if isinstance(options, dict) else None
+    if not bridge:
+        network_id = network.get("Id")
+        if not isinstance(network_id, str) or not re.fullmatch(r"[0-9a-f]{64}", network_id):
+            raise PreflightError("The dedicated network bridge identity could not be validated.")
+        bridge = f"br-{network_id[:12]}"
+    if not isinstance(bridge, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", bridge):
+        raise PreflightError("The dedicated network bridge identity could not be validated.")
+    return bridge, gateway
+
+
+def _is_owned_network_route(line: str, target: dict[str, Any] | None) -> bool:
+    fields = line.split()
+    if not fields:
+        return True
+    route_types = {"local", "broadcast", "blackhole", "unreachable", "prohibit", "multicast", "nat", "throw"}
+    route_type = fields[0] if fields[0] in route_types else "unicast"
+    destination_index = 1 if route_type != "unicast" else 0
+    if len(fields) <= destination_index:
+        return False
+    destination = fields[destination_index]
+    if destination == "default":
+        return True
+    try:
+        route = ipaddress.ip_network(destination, strict=False)
+    except ValueError:
+        return False
+    if route.version != 4 or not SUBNET.overlaps(route):
+        return True
+    if target is None:
+        return False
+    bridge, gateway = _bridge_route_identity(target)
+    attributes: dict[str, str] = {}
+    for index, key in enumerate(fields[destination_index + 1 :]):
+        if key in {"dev", "src", "via", "scope", "table", "proto"} and index + destination_index + 2 < len(fields):
+            attributes[key] = fields[destination_index + index + 2]
+    if attributes.get("dev") != bridge or attributes.get("src") != str(gateway) or "via" in attributes:
+        return False
+    if route_type == "unicast":
+        return route == SUBNET
+    if route_type == "local":
+        return route == ipaddress.ip_network(f"{gateway}/32")
+    if route_type == "broadcast":
+        address = route.network_address
+        return route.prefixlen == 32 and address in {SUBNET.network_address, SUBNET.broadcast_address}
+    return False
+
+
 def _candidate_network_state(runner: Runner) -> tuple[dict[str, Any] | None, bool]:
     names = _run(["docker", "network", "ls", "--format", "{{.Name}}"], runner).splitlines()
     target = None
@@ -259,34 +412,26 @@ def _candidate_network_state(runner: Runner) -> tuple[dict[str, Any] | None, boo
         model = _network_model(name, runner)
         if any(SUBNET.overlaps(subnet) for subnet in _network_subnets(model) if subnet.version == 4):
             raise PreflightError("The candidate subnet overlaps an existing Docker network.")
-    routes = _run(["ip", "-4", "route", "show", "table", "all"], runner)
-    for line in routes.splitlines():
-        fields = line.split()
-        if not fields:
-            continue
-        destination = fields[1] if fields[0] in {"local", "broadcast", "blackhole", "unreachable", "prohibit", "multicast", "nat", "throw"} and len(fields) > 1 else fields[0]
-        if destination == "default":
-            continue
+    if target is not None:
+        if target.get("Name") != NETWORK or target.get("Driver") != "bridge" or target.get("Internal") is not True:
+            raise PreflightError("The existing Rapport network has the wrong name, driver, or internal setting.")
+        subnets = _network_subnets(target)
+        if subnets != [SUBNET]:
+            raise PreflightError("The existing Rapport network does not use the verified dedicated subnet.")
+        configs = _network_config(target)
         try:
-            route = ipaddress.ip_network(destination, strict=False)
-        except ValueError:
-            continue
-        if route.version == 4 and SUBNET.overlaps(route) and not (target is not None and route == SUBNET):
-            raise PreflightError("The candidate subnet overlaps an IPv4 route on the host.")
+            ip_ranges = [ipaddress.ip_network(config.get("IPRange", ""), strict=False) for config in configs]
+        except (ValueError, TypeError) as exc:
+            raise PreflightError("The existing Rapport network address reservation is invalid.") from exc
+        if ip_ranges != [IP_RANGE] or PEER in IP_RANGE:
+            raise PreflightError("The existing Rapport network does not reserve its dynamic pool away from Traefik.")
+        _bridge_route_identity(target)
+
+    routes = _run(["ip", "-4", "route", "show", "table", "all"], runner)
+    if any(not _is_owned_network_route(line, target) for line in routes.splitlines()):
+        raise PreflightError("The candidate subnet overlaps an unrecognized IPv4 route on the host.")
     if target is None:
         return None, False
-    if target.get("Name") != NETWORK or target.get("Driver") != "bridge" or target.get("Internal") is not True:
-        raise PreflightError("The existing Rapport network has the wrong name, driver, or internal setting.")
-    subnets = _network_subnets(target)
-    if subnets != [SUBNET]:
-        raise PreflightError("The existing Rapport network does not use the verified dedicated subnet.")
-    configs = _network_config(target)
-    try:
-        ip_ranges = [ipaddress.ip_network(config.get("IPRange", ""), strict=False) for config in configs]
-    except (ValueError, TypeError) as exc:
-        raise PreflightError("The existing Rapport network address reservation is invalid.") from exc
-    if ip_ranges != [IP_RANGE] or PEER in IP_RANGE:
-        raise PreflightError("The existing Rapport network does not reserve its dynamic pool away from Traefik.")
     return target, True
 
 
@@ -374,14 +519,11 @@ def prepare(runner: Runner = subprocess.run) -> str:
     _check_implicit_config(runner)
 
     base_model = _compose_model([OWNER_COMPOSE], runner, directory=OWNER_DIR)
-    expected_model = _expected_merged(base_model)
     with tempfile.TemporaryDirectory(prefix="rapport-traefik-override-") as temporary_directory:
         temporary_override = Path(temporary_directory) / "override.yml"
         temporary_override.write_text(OVERRIDE_TEXT, encoding="utf-8")
         merged_model = _compose_model([OWNER_COMPOSE, temporary_override], runner, directory=OWNER_DIR)
     _validate_merge(base_model, merged_model)
-    if expected_model != merged_model:
-        raise PreflightError("The private Compose model check did not match the reviewed change.")
 
     network, exists = _candidate_network_state(runner)
     attached = False
@@ -394,7 +536,8 @@ def prepare(runner: Runner = subprocess.run) -> str:
         _run(
             [
                 "docker", "network", "create", "--driver", "bridge", "--internal",
-                "--subnet", str(SUBNET), "--ip-range", str(IP_RANGE), NETWORK,
+                "--subnet", str(SUBNET), "--gateway", str(SUBNET.network_address + 1),
+                "--ip-range", str(IP_RANGE), NETWORK,
             ],
             runner,
         )
@@ -412,6 +555,7 @@ def prepare(runner: Runner = subprocess.run) -> str:
             or PEER in IP_RANGE
         ):
             raise PreflightError("The newly created dedicated network failed its immediate verification.")
+        _bridge_route_identity(network)
         attached, _address = _validate_members(network, runner)
     if not attached:
         current_container = _one_inspect(["docker", "inspect", CONTAINER], runner)
