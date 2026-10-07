@@ -34,10 +34,10 @@ def test_linux_cohost_gate_isolated_bounded_and_cleans_only_owned_resources():
     assert "redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0" in source
     assert '--memory 128m --cpus 0.5 --pids-limit 64 --read-only' in source
     assert '--user 65534:65534 --memory 2g --cpus 2 --pids-limit 64 --read-only --cap-drop ALL' in source
-    assert "--tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777" in source
+    assert "--tmpfs /tmp:rw,exec,nosuid,nodev,size=128m,mode=1777" in source
     assert '--mount "type=bind,source=$ROOT,target=/workspace,readonly"' in source
     assert "RAPPORT_AUDITOR_TEST_REDIS_URL=redis://redis:6379/0" in source
-    assert 'docker inspect --format \'{{.State.ExitCode}}\' "$test_id"' in source
+    assert 'docker inspect --format \'{{.State.Running}} {{.State.ExitCode}}\' "$test_id"' in source
     assert '[[ "$pytest_status" == 0 ]]' in source
     assert 'docker rm -f "$test_id"' in source
     assert 'docker rm -f "$redis_id"' in source
@@ -47,7 +47,10 @@ def test_linux_cohost_gate_isolated_bounded_and_cleans_only_owned_resources():
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The Docker CLI mock exercises Linux Bash and trap cleanup semantics.")
-@pytest.mark.parametrize(("failure", "expected_status"), [("", 0), ("redis", 1), ("pytest", 1)])
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [("", 0), ("redis", 1), ("pytest", 1), ("pytest_cli", 1), ("running", 1)],
+)
 def test_linux_cohost_gate_cleans_only_created_resources_on_exit(tmp_path: Path, failure: str, expected_status: int):
     bash = _bash()
     if not bash:
@@ -70,8 +73,14 @@ elif [ "$1" = create ]; then
   printf '\\n'
 elif [ "$1" = exec ]; then
   [ "$DOCKER_FAILURE" = redis ] || printf 'PONG\\n'
+elif [ "$1" = start ] && [ "$2" = --attach ] && [ "$DOCKER_FAILURE" = pytest_cli ]; then
+  exit 42
 elif [ "$1" = inspect ]; then
-  if [ "$DOCKER_FAILURE" = pytest ]; then printf '42\\n'; else printf '0\\n'; fi
+  case "$DOCKER_FAILURE" in
+    pytest|pytest_cli) printf 'false 42\\n' ;;
+    running) printf 'true 0\\n' ;;
+    *) printf 'false 0\\n' ;;
+  esac
 fi
 """,
         encoding="utf-8",
@@ -98,10 +107,15 @@ fi
     assert any(call.startswith("rm -f a") for call in calls)
     assert any(call.startswith("network rm rapport-auditor-test-") for call in calls)
     assert not any(call.startswith("compose ") or call.startswith("volume ") or call.startswith("image rm") for call in calls)
-    if failure == "pytest":
-        assert any(call.startswith("inspect --format {{.State.ExitCode}}") for call in calls)
+    if failure in {"pytest", "pytest_cli"}:
+        assert any(call.startswith("inspect --format {{.State.Running}} {{.State.ExitCode}}") for call in calls)
         assert "full pytest suite passed" not in result.stdout
         assert "container exit code 42" in result.stderr
+    if failure == "pytest_cli":
+        assert "Docker could not attach" not in result.stderr
+    if failure == "running":
+        assert "still running" in result.stderr
+        assert "full pytest suite passed" not in result.stdout
     if failure == "redis":
         assert not any(call.startswith("create ") and "pytest" in call for call in calls)
         assert not any(call.startswith("rm -f b") for call in calls)

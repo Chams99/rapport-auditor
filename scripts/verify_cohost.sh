@@ -56,7 +56,7 @@ done
 test_id="$(docker create --name "$test_name" --label "$label" --network "$network" \
   --user 65534:65534 --memory 2g --cpus 2 --pids-limit 64 --read-only --cap-drop ALL \
   --security-opt no-new-privileges:true \
-  --tmpfs /tmp:rw,nosuid,nodev,size=128m,mode=1777 \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=128m,mode=1777 \
   --mount "type=bind,source=$ROOT,target=/workspace,readonly" --workdir /workspace \
   --env PYTHONDONTWRITEBYTECODE=1 \
   --env PYTHONPATH=/workspace/apps/api:/workspace/apps/web:/workspace/packages/core:/workspace/tests \
@@ -64,8 +64,10 @@ test_id="$(docker create --name "$test_name" --label "$label" --network "$networ
   "$builder_id" python -m pytest -p no:cacheprovider -q)"
 start_status=0
 docker start --attach "$test_id" || start_status=$?
-[[ "$start_status" == 0 ]] || fail "Docker could not attach to the full pytest run."
-pytest_status="$(docker inspect --format '{{.State.ExitCode}}' "$test_id")"
+container_state="$(docker inspect --format '{{.State.Running}} {{.State.ExitCode}}' "$test_id")"
+read -r container_running pytest_status <<< "$container_state"
+[[ "$container_running" == false ]] || fail "The pytest container is still running; its result cannot be confirmed."
 [[ "$pytest_status" =~ ^[0-9]+$ ]] || fail "Could not confirm the full pytest container exit status."
 [[ "$pytest_status" == 0 ]] || fail "The full pytest suite failed (container exit code $pytest_status)."
+[[ "$start_status" == 0 ]] || fail "Docker attach failed with status $start_status although pytest reported success."
 printf '%s\n' 'Linux/Python 3.12.14 full pytest suite passed, including live Redis integration.'

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from flask.wrappers import Request as FlaskRequest
 
 from conftest import LOCAL_ORIGIN, TEST_SECRET, read_sample
 
@@ -119,10 +120,11 @@ def test_french_nonbreaking_spacing_is_accepted_and_content_language_is_preserve
     assert text not in response.get_data(as_text=True)  # audit JSON does not echo the submitted document
 
 
-def test_deeply_nested_unknown_json_is_a_safe_malformed_json_error(client, csrf_token, caplog):
-    # Exceed the JSON decoder's nesting limit on both supported runtimes
-    # (Python 3.10 and 3.12 use different limits) before unknown-field checks.
-    nested_value = "[" * 5000 + "0" + "]" * 5000
+def test_deeply_nested_malformed_json_is_safe(client, csrf_token, caplog):
+    # Keep this malformed on every supported runtime: one array remains open
+    # when the object closes. Python versions may differ on whether their JSON
+    # decoder reaches the syntax error or raises RecursionError first.
+    nested_value = "[" * 5000 + "0" + "]" * 4999
     body = '{"text":"syntheti","unknown":' + nested_value + "}"
     assert len(body.encode("utf-8")) < 11_000
 
@@ -138,6 +140,49 @@ def test_deeply_nested_unknown_json_is_a_safe_malformed_json_error(client, csrf_
     assert error["code"] == "malformed_json"
     assert body.encode() not in response.data
     assert body not in caplog.text
+    assert TEST_SECRET.encode() not in response.data
+
+
+def test_deeply_nested_unknown_json_is_safely_rejected(client, csrf_token, caplog):
+    # A valid deeply nested value may be decoded or hit the runtime's recursion
+    # guard. Both outcomes must stay a safe client error across Python versions.
+    nested_value = "[" * 5000 + "0" + "]" * 5000
+    body = '{"text":"syntheti","unknown":' + nested_value + "}"
+    assert len(body.encode("utf-8")) < 11_000
+
+    response = client.post(
+        "/api/v1/audit",
+        data=body,
+        content_type="application/json",
+        headers={"Origin": LOCAL_ORIGIN, "X-CSRF-Token": csrf_token},
+        base_url=LOCAL_ORIGIN,
+    )
+
+    error = assert_error(response, 400)
+    assert error["code"] in {"malformed_json", "unknown_json_field"}
+    assert body.encode() not in response.data
+    assert body not in caplog.text
+    assert TEST_SECRET.encode() not in response.data
+
+
+def test_json_decoder_recursion_error_is_a_malformed_client_error(client, csrf_token, caplog, monkeypatch):
+    def raise_recursion_error(_request, *args, **kwargs):
+        raise RecursionError("synthetic decoder depth")
+
+    monkeypatch.setattr(FlaskRequest, "get_json", raise_recursion_error)
+    body = '{"text":"synthetic"}'
+    response = client.post(
+        "/api/v1/audit",
+        data=body,
+        content_type="application/json",
+        headers={"Origin": LOCAL_ORIGIN, "X-CSRF-Token": csrf_token},
+        base_url=LOCAL_ORIGIN,
+    )
+
+    error = assert_error(response, 400)
+    assert error["code"] == "malformed_json"
+    assert "synthetic decoder depth" not in response.get_data(as_text=True)
+    assert "synthetic decoder depth" not in caplog.text
     assert TEST_SECRET.encode() not in response.data
 
 
