@@ -4,7 +4,8 @@
   "description": "Optional real-browser and accessibility smoke checks for the Flask app",
   "scripts": {
     "install:browsers": "playwright install chromium",
-    "test:browser": "node browser_smoke.cjs"
+    "test:browser": "node browser_smoke.cjs",
+    "test:state": "node test_app_state.cjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

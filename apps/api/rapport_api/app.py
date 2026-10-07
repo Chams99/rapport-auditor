@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import secrets
 import time
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
@@ -462,6 +464,8 @@ def _error_response(app: Flask, code: str, status_code: int, field: str | None =
             is_public_service=app.config["APP_MODE"] == "server",
             limits={
                 "max_input_chars": app.config["MAX_INPUT_CHARS"],
+                "max_input_bytes": app.config["MAX_INPUT_BYTES"],
+                "max_lines": app.config["MAX_LINES"],
                 "max_upload_bytes": app.config["MAX_UPLOAD_BYTES"],
             },
             error=message,
@@ -646,6 +650,8 @@ def _localized_template_context(app: Flask, **values: Any) -> dict[str, Any]:
         "is_public_service": app.config["APP_MODE"] == "server",
         "limits": {
             "max_input_chars": app.config["MAX_INPUT_CHARS"],
+            "max_input_bytes": app.config["MAX_INPUT_BYTES"],
+            "max_lines": app.config["MAX_LINES"],
             "max_upload_bytes": app.config["MAX_UPLOAD_BYTES"],
         },
         "text": "",
@@ -669,6 +675,14 @@ def _localized_template_context(app: Flask, **values: Any) -> dict[str, Any]:
     return context
 
 
+def _static_asset_versions(static_dir: Path) -> dict[str, str]:
+    """Fingerprint the small set of package-owned assets used by the page."""
+    return {
+        filename: hashlib.sha256((static_dir / filename).read_bytes()).hexdigest()[:12]
+        for filename in ("style.css", "app.js")
+    }
+
+
 def create_app(config: dict[str, Any] | None = None) -> Flask:
     """Create a local app by default or validate the explicit public server profile."""
     package_templates = WEB_PACKAGE_DIR / "templates"
@@ -678,6 +692,12 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         template_folder=str(package_templates),
         static_folder=None,
     )
+    asset_versions = _static_asset_versions(package_static)
+
+    @app.context_processor
+    def provide_asset_versions() -> dict[str, dict[str, str]]:
+        return {"asset_versions": asset_versions}
+
     app.request_class = BoundedMemoryRequest
     try:
         app.config.update(load_environment())

@@ -4,9 +4,11 @@ Rapport Auditor is a bilingual review workspace for academic report drafts. It h
 
 The analysis is deterministic and uses separate, narrow English and French cue rules. Findings are human review prompts, not judgments about writing quality. Citation markers are only visible cues: the app does not resolve bibliography entries or check a source’s existence, relevance, or accuracy. It does not detect plagiarism or authorship, or verify factual claims. The synthetic fixtures establish rule conformance for those examples only, not real-world reliability; see [the evaluation notes](docs/EVALUATION.md).
 
-![Rapport Auditor desktop workspace](docs/screenshots/home-desktop.png)
+![English desktop workspace after the 2026-10-07 UI refinement](docs/screenshots/ux-home-desktop.jpg)
 
-The browser checks also capture [a clean synthetic review](docs/screenshots/sample-review.png) and a [synthetic review with repetition and source-check prompts](docs/screenshots/sample-findings.png). Both examples are fictional and contain no real study, source, or result.
+Current interface captures use synthetic text: [English desktop home](docs/screenshots/ux-home-desktop.jpg), [French mobile home](docs/screenshots/ux-home-mobile-fr.jpg), [English desktop review](docs/screenshots/ux-review-desktop.jpg), [French mobile review](docs/screenshots/ux-review-mobile-fr.jpg), and [desktop revision preview](docs/screenshots/ux-revision-desktop.jpg). They show the interface only; they are not evidence of analysis accuracy.
+
+The earlier automated browser checks also capture [a clean synthetic review](docs/screenshots/sample-review.png) and a [synthetic review with repetition and source-check prompts](docs/screenshots/sample-findings.png). Both examples are fictional and contain no real study, source, or result. The [verification guide](docs/TESTING.md) distinguishes those automated captures from the current in-app Chromium review.
 
 ## Privacy and input
 
