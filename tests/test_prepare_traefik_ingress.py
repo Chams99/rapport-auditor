@@ -150,6 +150,55 @@ def test_prepare_is_idempotent_when_exact_override_and_network_already_exist(fak
     assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
 
 
+def test_prepare_accepts_container_recreated_from_base_and_exact_override(fake_docker):
+    helper.prepare(fake_docker)
+    endpoint = fake_docker.networks[helper.NETWORK]["Containers"].pop(fake_docker.container_id)
+    fake_docker.container_id = "d" * 64
+    fake_docker.container["Id"] = fake_docker.container_id
+    fake_docker.container["Config"]["Image"] = helper.IMAGE_DIGEST
+    fake_docker.container["Config"]["Labels"]["com.docker.compose.project.config_files"] = (
+        f"{fake_docker.owner_compose},{helper.OVERRIDE}"
+    )
+    fake_docker.networks[helper.NETWORK]["Containers"][fake_docker.container_id] = endpoint
+    fake_docker.commands.clear()
+
+    report = helper.prepare(fake_docker)
+
+    assert "traefik_restarted=false" in report
+    assert not any(command[:3] == ["docker", "network", "create"] for command in fake_docker.commands)
+    assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
+
+
+def test_prepare_rejects_image_reference_not_matching_compose_file_pair(fake_docker):
+    helper.prepare(fake_docker)
+    cases = (
+        (str(fake_docker.owner_compose), helper.IMAGE_DIGEST),
+        (f"{fake_docker.owner_compose},{helper.OVERRIDE}", "traefik:nightly"),
+    )
+    for config_files, image_ref in cases:
+        fake_docker.container["Config"]["Labels"]["com.docker.compose.project.config_files"] = (
+            config_files
+        )
+        fake_docker.container["Config"]["Image"] = image_ref
+        with pytest.raises(helper.PreflightError, match="image reference"):
+            helper.prepare(fake_docker)
+
+
+def test_prepare_rejects_unknown_extra_compose_file_after_recreation(fake_docker):
+    helper.prepare(fake_docker)
+    fake_docker.container["Config"]["Labels"]["com.docker.compose.project.config_files"] = (
+        f"{fake_docker.owner_compose},{helper.OVERRIDE},/home/ubuntu/traefik/unknown.yml"
+    )
+    fake_docker.commands.clear()
+
+    with pytest.raises(helper.PreflightError, match="unexpected Compose file list"):
+        helper.prepare(fake_docker)
+
+    assert helper.OVERRIDE.read_text(encoding="utf-8") == helper.OVERRIDE_TEXT
+    assert not any(command[:3] == ["docker", "network", "create"] for command in fake_docker.commands)
+    assert not any(command[:3] == ["docker", "network", "connect"] for command in fake_docker.commands)
+
+
 def test_prepare_aborts_before_persistent_change_on_implicit_static_config(fake_docker, monkeypatch):
     fake_docker.implicit_config = "present"
 

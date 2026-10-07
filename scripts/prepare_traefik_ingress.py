@@ -77,16 +77,37 @@ def _container_labels(container: dict[str, Any]) -> dict[str, str]:
     return {key: value for key, value in labels.items() if isinstance(key, str) and isinstance(value, str)}
 
 
+def _has_exact_override() -> bool:
+    if OVERRIDE.is_symlink() or not OVERRIDE.is_file():
+        return False
+    try:
+        return OVERRIDE.read_text(encoding="utf-8") == OVERRIDE_TEXT
+    except (OSError, UnicodeError):
+        return False
+
+
 def _validate_owner_container(container: dict[str, Any], runner: Runner) -> str:
     labels = _container_labels(container)
     expected_labels = {
         "com.docker.compose.project": PROJECT,
         "com.docker.compose.service": CONTAINER,
         "com.docker.compose.project.working_dir": str(OWNER_DIR),
-        "com.docker.compose.project.config_files": str(OWNER_COMPOSE),
     }
     if any(labels.get(key) != value for key, value in expected_labels.items()):
         raise PreflightError("The running Traefik container does not match the expected owner Compose stack.")
+    config_files = tuple(
+        item.strip()
+        for item in labels.get("com.docker.compose.project.config_files", "").split(",")
+    )
+    base_files = (str(OWNER_COMPOSE),)
+    persistent_override_files = (str(OWNER_COMPOSE), str(OVERRIDE))
+    expected_image = "traefik:latest"
+    if config_files == persistent_override_files:
+        if not _has_exact_override():
+            raise PreflightError("The owner stack references an override that is not the exact reviewed file.")
+        expected_image = IMAGE_DIGEST
+    elif config_files != base_files:
+        raise PreflightError("The running Traefik container has an unexpected Compose file list.")
     state = container.get("State")
     if (
         container.get("Name") != f"/{CONTAINER}"
@@ -98,7 +119,7 @@ def _validate_owner_container(container: dict[str, Any], runner: Runner) -> str:
     if not isinstance(container_id, str) or not re.fullmatch(r"[0-9a-f]{64}", container_id):
         raise PreflightError("The running Traefik container ID could not be validated.")
     config = container.get("Config", {})
-    if not isinstance(config, dict) or config.get("Image") != "traefik:latest":
+    if not isinstance(config, dict) or config.get("Image") != expected_image:
         raise PreflightError("The running Traefik image reference differs from the inspected release.")
     image_id = container.get("Image")
     if not isinstance(image_id, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
@@ -167,7 +188,7 @@ def _check_owner_files() -> None:
     if os.environ.get("COMPOSE_FILE"):
         raise PreflightError("COMPOSE_FILE is set; run this helper from a clean operator shell.")
     if OVERRIDE.exists() or OVERRIDE.is_symlink():
-        if OVERRIDE.is_symlink() or not OVERRIDE.is_file() or OVERRIDE.read_text(encoding="utf-8") != OVERRIDE_TEXT:
+        if not _has_exact_override():
             raise PreflightError("A different Compose override already exists; it was left untouched.")
 
 
