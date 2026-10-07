@@ -91,8 +91,8 @@ for attempt in {1..20}; do
 done
 [ "$health" = healthy ] || die "The Rapport app did not become healthy within 40 seconds."
 
-"${COMPOSE[@]}" cp scripts/container_smoke.py app:/tmp/rapport-container-smoke.py
-"${COMPOSE[@]}" exec -T app python /tmp/rapport-container-smoke.py
+"${COMPOSE[@]}" exec -T app sh -c 'cat > /tmp/rapport-container-smoke.py && exec python /tmp/rapport-container-smoke.py' \
+  < scripts/container_smoke.py
 RAPPORT_AUDITOR_RELEASE_BASE_URL=https://rapport.chames.tn \
 RAPPORT_AUDITOR_LOG_CANARY="rapport-smoke-$(date +%s)-$$" \
   python3 scripts/release_http_smoke.py
