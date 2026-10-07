@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rapport-auditor"
+version = "1.0.0"
+description = "Bilingual editing and citation-cue review for academic report drafts"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "Flask==3.1.3",
+  "Werkzeug==3.1.9",
+  "waitress==3.0.2",
+  "redis==8.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.16.10",
+  "pip-audit==2.10.1",
+  "pip-tools==7.6.1",
+]
+
+[project.scripts]
+rapport-auditor = "rapport_api.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["apps/api", "apps/web", "packages/core"]
+
+[tool.setuptools.package-data]
+rapport_web = ["templates/*.html", "templates/**/*", "static/*", "static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = ["E501", "B905"]

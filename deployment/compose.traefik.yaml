@@ -1,0 +1,140 @@
+name: rapport-auditor-traefik
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    init: true
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    expose:
+      - "5000"
+    environment:
+      RAPPORT_AUDITOR_MODE: server
+      RAPPORT_AUDITOR_HOST: 0.0.0.0
+      RAPPORT_AUDITOR_PORT: "5000"
+      RAPPORT_AUDITOR_THREADS: "4"
+      RAPPORT_AUDITOR_SECRET_KEY_FILE: /run/secrets/rapport_secret_key
+      RAPPORT_AUDITOR_TRUSTED_HOSTS: ${RAPPORT_AUDITOR_PUBLIC_DOMAIN:?Set RAPPORT_AUDITOR_PUBLIC_DOMAIN in deployment/.env.traefik}
+      RAPPORT_AUDITOR_TRUSTED_ORIGINS: https://${RAPPORT_AUDITOR_PUBLIC_DOMAIN:?Set RAPPORT_AUDITOR_PUBLIC_DOMAIN in deployment/.env.traefik}
+      RAPPORT_AUDITOR_TRUSTED_PROXY: ${RAPPORT_AUDITOR_TRUSTED_PROXY:?Set the exact fixed Traefik peer IP in deployment/.env.traefik}
+      RAPPORT_AUDITOR_REDIS_URL: redis://redis:6379/0
+      RAPPORT_AUDITOR_RATE_LIMIT_NAMESPACE: rapport-auditor:cohost:v1
+      RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS: "30"
+      RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS: "60"
+      RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS: "4096"
+      RAPPORT_AUDITOR_REDIS_TIMEOUT_SECONDS: "0.5"
+      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "2"
+      RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS: "10"
+      RAPPORT_AUDITOR_WORKER_MEMORY_MB: "512"
+      RAPPORT_AUDITOR_WORKER_CPU_SECONDS: "8"
+    secrets:
+      - source: auditor_secret
+        target: rapport_secret_key
+    networks:
+      auditor_ingress: {}
+      redis_net: {}
+    depends_on:
+      redis:
+        condition: service_healthy
+    mem_limit: ${RAPPORT_AUDITOR_APP_MEMORY_LIMIT:?Set the Rapport app memory limit after checking VPS capacity}
+    cpus: ${RAPPORT_AUDITOR_APP_CPU_LIMIT:?Set the Rapport app CPU limit after checking VPS capacity}
+    pids_limit: 32
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request; u='http://127.0.0.1:5000/api/v1/health/ready'; h=os.environ['RAPPORT_AUDITOR_TRUSTED_HOSTS'].split(',')[0]; urllib.request.urlopen(urllib.request.Request(u,headers={'Host':h}),timeout=2).read()"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${RAPPORT_AUDITOR_INGRESS_NETWORK:?Set the persistent internal Traefik network name in deployment/.env.traefik}
+      traefik.http.routers.rapport-auditor.rule: Host(`${RAPPORT_AUDITOR_PUBLIC_DOMAIN:?Set RAPPORT_AUDITOR_PUBLIC_DOMAIN in deployment/.env.traefik}`)
+      traefik.http.routers.rapport-auditor.entrypoints: websecure
+      traefik.http.routers.rapport-auditor.tls: "true"
+      traefik.http.routers.rapport-auditor.tls.certresolver: myresolver
+      traefik.http.routers.rapport-auditor.service: rapport-auditor
+      traefik.http.routers.rapport-auditor.middlewares: rapport-auditor-inflight,rapport-auditor-request-cap,default-chain@file
+      traefik.http.services.rapport-auditor.loadbalancer.server.port: "5000"
+      traefik.http.services.rapport-auditor.loadbalancer.healthcheck.path: /api/v1/health/ready
+      traefik.http.services.rapport-auditor.loadbalancer.healthcheck.hostname: ${RAPPORT_AUDITOR_PUBLIC_DOMAIN:?Set RAPPORT_AUDITOR_PUBLIC_DOMAIN in deployment/.env.traefik}
+      traefik.http.services.rapport-auditor.loadbalancer.healthcheck.interval: 15s
+      traefik.http.services.rapport-auditor.loadbalancer.healthcheck.timeout: 3s
+      traefik.http.middlewares.rapport-auditor-inflight.inflightreq.amount: "8"
+      traefik.http.middlewares.rapport-auditor-request-cap.buffering.maxRequestBodyBytes: "1100000"
+      traefik.http.middlewares.rapport-auditor-request-cap.buffering.memRequestBodyBytes: "1100000"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    restart: unless-stopped
+    user: "999:1000"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - ""
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - redis_rate_state:/data
+    networks:
+      redis_net: {}
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 32
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    labels:
+      traefik.enable: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  redis_rate_state:
+
+networks:
+  auditor_ingress:
+    name: ${RAPPORT_AUDITOR_INGRESS_NETWORK:?Set the persistent internal Traefik network name in deployment/.env.traefik}
+    external: true
+  redis_net:
+    internal: true
+
+secrets:
+  auditor_secret:
+    file: ${RAPPORT_AUDITOR_SECRET_FILE:?Set RAPPORT_AUDITOR_SECRET_FILE in deployment/.env.traefik}

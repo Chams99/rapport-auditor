@@ -1,0 +1,3 @@
+SYNTHETIC TEST TEXT — THIS DOES NOT REPORT REAL RESEARCH.
+
+Ce paragraphe fictif sert à vérifier la présentation de la limite linguistique. L’interface peut être en français, mais les règles de style du moteur restent principalement fondées sur des motifs anglais. Ce texte n’est pas une évaluation de la qualité du texte français.

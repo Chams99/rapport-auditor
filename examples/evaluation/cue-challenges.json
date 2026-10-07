@@ -1,0 +1,356 @@
+[
+  {
+    "id": "en-repeated-starts",
+    "language": "en",
+    "text": "The method groups each fictional sample by its stated category. The method records the same invented measurements in a separate table. The method compares those rows after the review is complete.",
+    "expected_codes": ["repeated_sentence_start"],
+    "note": "Synthetic prose with a literal repeated two-word sentence opening."
+  },
+  {
+    "id": "fr-repeated-starts",
+    "language": "fr",
+    "text": "Le système classe chaque échantillon fictif selon sa catégorie. Le système enregistre ensuite les mesures inventées dans un tableau séparé. Le système compare ces lignes après la révision.",
+    "expected_codes": ["repeated_sentence_start"],
+    "note": "Synthetic French prose with a literal repeated two-word sentence opening."
+  },
+  {
+    "id": "en-year-ending-prose-is-not-a-page-header",
+    "language": "en",
+    "text": "The results show an improvement in 2025. The results suggest a difference in 2025. The results measure a change in 2025.",
+    "expected_codes": ["repeated_sentence_start", "claim_needs_source"],
+    "note": "Three distinct legitimate-looking study sentences include a year; repeated-line PDF header cleanup must not erase them."
+  },
+  {
+    "id": "fr-year-ending-prose-is-not-a-page-header",
+    "language": "fr",
+    "text": "Les résultats montrent une amélioration fictive en 2025. Les résultats décrivent une différence fictive en 2025. Les résultats comparent une variation fictive en 2025.",
+    "expected_codes": ["repeated_sentence_start", "claim_needs_source"],
+    "note": "Three distinct French study sentences include a year; PDF header inference must preserve the actual prose and its word/sentence counts."
+  },
+  {
+    "id": "en-identical-university-year-lines-are-content",
+    "language": "en",
+    "text": "Faculty of Sciences of Gafsa 2025/2026.\nFaculty of Sciences of Gafsa 2025/2026.\nFaculty of Sciences of Gafsa 2025/2026.",
+    "expected_codes": ["repeated_sentence_start", "repeated_phrase"],
+    "expected_sentence_count": 3,
+    "expected_word_count": 15,
+    "note": "Three identical newline-separated synthetic university/year lines are treated as supplied text, not silently deleted as presumed PDF headers."
+  },
+  {
+    "id": "fr-identical-university-year-lines-are-content",
+    "language": "fr",
+    "text": "Université fictive de Tunis 2025/2026.\nUniversité fictive de Tunis 2025/2026.\nUniversité fictive de Tunis 2025/2026.",
+    "expected_codes": ["repeated_sentence_start", "repeated_phrase"],
+    "expected_sentence_count": 3,
+    "expected_word_count": 12,
+    "note": "Three identical newline-separated synthetic French institution/year lines remain visible and are analyzed as content."
+  },
+  {
+    "id": "en-repeated-phrase-across-sentences",
+    "language": "en",
+    "text": "The first stage follows a clear protocol for each fictional sample. Next, every operator follows a clear protocol before coding. During review, the team follows a clear protocol again.",
+    "expected_codes": ["repeated_phrase"],
+    "note": "The same three-word sequence recurs in three distinct sentences."
+  },
+  {
+    "id": "en-start-threshold-negative",
+    "language": "en",
+    "text": "The method groups each fictional sample by its stated category. The method records invented measurements in a separate table. A final sentence describes the review process without repeating that opening.",
+    "expected_codes": [],
+    "note": "Only two sentences share an opening; the intended repetition threshold is three."
+  },
+  {
+    "id": "en-formulaic-listed-phrase",
+    "language": "en",
+    "text": "It is worth noting that this fictional measurement belongs only to the example dataset.",
+    "expected_codes": ["formulaic_phrase"],
+    "note": "One exact phrase from the documented English cue list."
+  },
+  {
+    "id": "fr-formulaic-listed-phrase",
+    "language": "fr",
+    "text": "Il convient de noter que cette mesure fictive appartient uniquement au jeu d’exemple.",
+    "expected_codes": ["formulaic_phrase"],
+    "note": "One exact phrase from the documented French cue list."
+  },
+  {
+    "id": "en-formulaic-paraphrase-negative",
+    "language": "en",
+    "text": "This fictional note calls attention to a measurement in the example table.",
+    "expected_codes": [],
+    "note": "A semantically similar but non-listed paraphrase."
+  },
+  {
+    "id": "en-long-sentence-positive",
+    "language": "en",
+    "text": "In this fictional demonstration the researchers placed the labelled sample beside a calibrated instrument and recorded three illustrative readings over several quiet afternoons and compared every value against a simulated baseline and documented the procedure in their notebook and checked the transcription twice and discussed possible measurement variation with a colleague and saved the resulting table for a later classroom exercise.",
+    "expected_codes": ["long_sentence"],
+    "note": "A deliberately long but syntactically ordinary invented sentence."
+  },
+  {
+    "id": "en-long-threshold-negative",
+    "language": "en",
+    "text": "Researchers placed the labelled sample beside an instrument and recorded three readings against a simulated baseline while a colleague documented the procedure and saved a short table for class.",
+    "expected_codes": [],
+    "note": "A shorter control sentence; it should remain below the specified word threshold."
+  },
+  {
+    "id": "en-dense-sentence-positive",
+    "language": "en",
+    "text": "The fictional protocol lists temperature, pressure, and duration; observers record each reading in a notebook: one checks labels, another verifies units — and a reviewer stores the final table for class.",
+    "expected_codes": ["dense_sentence"],
+    "note": "A synthetic sentence designed to cross the proposed density and separator thresholds."
+  },
+  {
+    "id": "en-dense-separator-negative",
+    "language": "en",
+    "text": "The fictional protocol lists temperature and pressure; the observer records each value in a numbered notebook and the reviewer compares the entries after the classroom exercise is complete.",
+    "expected_codes": [],
+    "note": "A shorter control with fewer separator cues."
+  },
+  {
+    "id": "en-empirical-marker-without-visible-citation",
+    "language": "en",
+    "text": "The results show a larger change in every fictional trial, although this invented paragraph gives no visible source or method reference.",
+    "expected_codes": ["claim_needs_source"],
+    "note": "An explicit empirical reporting phrase with no visible citation cue."
+  },
+  {
+    "id": "fr-empirical-marker-without-visible-citation",
+    "language": "fr",
+    "text": "Les résultats montrent une variation plus forte dans chaque essai fictif, mais ce paragraphe inventé ne donne aucune référence visible à une source ou à une méthode.",
+    "expected_codes": ["claim_needs_source"],
+    "note": "French explicit empirical reporting phrase with no visible citation cue."
+  },
+  {
+    "id": "en-empirical-marker-with-tex-citation",
+    "language": "en",
+    "source_format": "tex",
+    "text": "The results show a larger change in every fictional trial \\cite{invented-key}.",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "A visible invented TeX citation shares the sentence with an empirical marker; no bibliography is supplied."
+  },
+  {
+    "id": "en-visible-citation-without-empirical-marker",
+    "language": "en",
+    "text": "The fictional instrument was assembled for this classroom exercise [Example, 2026].",
+    "expected_codes": [],
+    "expected_citation_count": 1,
+    "note": "A citation-shaped marker is present, but the sentence has no configured empirical-reporting phrase."
+  },
+  {
+    "id": "en-citation-on-previous-sentence-only",
+    "language": "en",
+    "text": "The fictional measurement procedure is described in an invented note [Example, 2026]. The results show stable variance across every imaginary trial.",
+    "expected_codes": ["claim_needs_source"],
+    "expected_citation_count": 1,
+    "note": "The visible citation belongs to the preceding sentence and should not be treated as local support for the next one."
+  },
+  {
+    "id": "en-ordinary-technical-prose",
+    "language": "en",
+    "text": "The thermistor samples the chamber every two seconds and stores each reading as a signed sixteen-bit integer.",
+    "expected_codes": [],
+    "note": "A precise technical sentence without a configured empirical reporting phrase."
+  },
+  {
+    "id": "en-ordinary-falsehood-capability-control",
+    "language": "en",
+    "text": "The Moon is made of green cheese, according to this entirely fictional classroom sentence.",
+    "expected_codes": [],
+    "note": "An intentionally false ordinary factual statement: the rules are not expected to detect its truth value."
+  },
+  {
+    "id": "fr-academic-spacing-control",
+    "language": "fr",
+    "text": "Bonjour : l’échantillon fictif contient 1 000 valeurs et reste lisible en français.",
+    "expected_codes": [],
+    "note": "Normal French no-break and narrow no-break spaces (U+00A0, U+202F), including number grouping."
+  },
+  {
+    "id": "fr-ascii-apostrophe-variant",
+    "language": "fr",
+    "text": "L'étude a révélé une différence fictive dans chaque essai décrit par ce paragraphe.",
+    "expected_codes": ["claim_needs_source"],
+    "note": "ASCII apostrophe spelling of the French elision; it should match the same cue as typographic l’étude."
+  },
+  {
+    "id": "en-quoted-empirical-phrase-negative",
+    "language": "en",
+    "text": "The phrase ‘the results show’ is mentioned in this fictional glossary note, not reported as an experiment result.",
+    "expected_codes": [],
+    "note": "A metalinguistic mention in quotation marks should not be mistaken for the passage reporting results."
+  },
+  {
+    "id": "en-negated-empirical-phrase-negative",
+    "language": "en",
+    "text": "The results did not show a difference in this fictional trial, and the procedure remains illustrative.",
+    "expected_codes": [],
+    "note": "A negated empirical statement should not accidentally match the exact positive reporting phrase."
+  },
+  {
+    "id": "en-own-method-observation",
+    "language": "en",
+    "text": "We observed the fictional operator only to check how long the setup procedure took.",
+    "expected_codes": ["claim_needs_source"],
+    "note": "Intentional ambiguity case: literal observation wording also appears in method descriptions, so the cue is a human prompt rather than a verdict."
+  },
+  {
+    "id": "en-abbreviation-decimal-then-cited-result",
+    "language": "en",
+    "source_format": "tex",
+    "text": "Dr. Moreau recorded 2.5 units during the fictional test. The results show a 0.5 change \\cite{invented-key}.",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "Checks abbreviation/decimal sentence segmentation and an explicit TeX citation on the second sentence."
+  },
+  {
+    "id": "en-author-date-citation",
+    "language": "en",
+    "text": "The results show a larger change in the fictional sample [Smith, 2024].",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "Common bracketed author-date citation shape; this fictional key is not resolved."
+  },
+  {
+    "id": "en-plain-percent-author-date-citation",
+    "language": "en",
+    "text": "The results show a 10% improvement in the fictional sample (Smith, 2024).",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "Plain-text percent punctuation is not a TeX comment and must preserve the adjacent author-date cue."
+  },
+  {
+    "id": "fr-parenthetical-author-date-citation",
+    "language": "fr",
+    "text": "Les résultats montrent une variation dans cet essai fictif (Martin, 2024).",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "Common parenthetical author-date citation shape in French prose; this fictional key is not resolved."
+  },
+  {
+    "id": "fr-plain-percent-author-date-citation",
+    "language": "fr",
+    "text": "Les résultats montrent une amélioration fictive de 10 % (Martin, 2024).",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "French plain-text percent spacing and an author-date marker remain in the same sentence."
+  },
+  {
+    "id": "fr-repeated-phrase-across-sentences",
+    "language": "fr",
+    "text": "Chaque groupe décrit un protocole clair pour le test fictif. Une autre équipe décrit un protocole clair pour le contrôle suivant. Le dernier groupe décrit un protocole clair pour la comparaison.",
+    "expected_codes": ["repeated_phrase"],
+    "note": "A three-word phrase containing two content words appears in three distinct French sentences."
+  },
+  {
+    "id": "fr-repeated-phrase-threshold-negative",
+    "language": "fr",
+    "text": "Chaque groupe décrit un protocole clair pour le test fictif. Une autre équipe décrit un protocole clair pour le contrôle suivant. Le dernier groupe conserve une méthode distincte pour la comparaison.",
+    "expected_codes": [],
+    "note": "The configured French phrase threshold is not met because the same three-word phrase appears only twice."
+  },
+  {
+    "id": "fr-long-and-dense-sentence-positive",
+    "language": "fr",
+    "text": "Dans cette démonstration entièrement fictive, les chercheurs ont placé l’échantillon étiqueté près d’un instrument calibré, ont relevé trois valeurs illustratives pendant plusieurs après-midi calmes, puis ont comparé chaque résultat à une base simulée; une collègue a consigné la procédure dans son carnet, vérifié deux fois la transcription, discuté des variations possibles et conservé le tableau pour un exercice universitaire ultérieur.",
+    "expected_codes": ["long_sentence", "dense_sentence"],
+    "note": "A deliberately long, clause-heavy French sentence crosses both explicit length and punctuation thresholds."
+  },
+  {
+    "id": "fr-long-sentence-threshold-negative",
+    "language": "fr",
+    "text": "Les chercheurs ont placé l’échantillon près de l’instrument et relevé trois valeurs fictives avant de comparer les résultats au tableau final.",
+    "expected_codes": [],
+    "note": "An ordinary shorter French method sentence remains below the configured 36-word threshold."
+  },
+  {
+    "id": "fr-dense-separator-negative",
+    "language": "fr",
+    "text": "Le protocole fictif indique la température et la pression; l’observateur consigne chaque valeur dans un carnet avant que la collègue compare les entrées après l’exercice universitaire.",
+    "expected_codes": [],
+    "note": "This shorter French sentence has fewer than three configured clause separators."
+  },
+  {
+    "id": "fr-formulaic-paraphrase-negative",
+    "language": "fr",
+    "text": "Cette note fictive attire l’attention sur une mesure du tableau sans employer les formules de la liste de révision.",
+    "expected_codes": [],
+    "note": "A French paraphrase of a listed formula is intentionally not an exact phrase match."
+  },
+  {
+    "id": "fr-multiple-tex-citations",
+    "language": "fr",
+    "source_format": "tex",
+    "text": "Les résultats montrent une variation dans l’essai fictif \\parencite[voir \\textbf{détail}][p. 4]{Martin2024} et \\textcite{Diallo2025}.",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 2,
+    "note": "Two supported TeX author-date citation commands share a French empirical-reporting sentence; neither key is resolved."
+  },
+  {
+    "id": "fr-visible-citation-without-empirical-marker",
+    "language": "fr",
+    "source_format": "tex",
+    "text": "La balance fictive a été calibrée selon la notice de laboratoire \\cite{modele2026}.",
+    "expected_codes": [],
+    "expected_citation_count": 1,
+    "note": "A visible TeX reference is surfaced separately without turning ordinary technical prose into a support finding."
+  },
+  {
+    "id": "fr-quoted-empirical-phrase-negative",
+    "language": "fr",
+    "text": "La formule « les résultats montrent » est citée dans cette note fictive; aucune observation n’est rapportée.",
+    "expected_codes": [],
+    "note": "A quoted metalinguistic mention of the French empirical phrase is not itself a report of results."
+  },
+  {
+    "id": "fr-math-comment-and-apostrophe-control",
+    "language": "fr",
+    "source_format": "tex",
+    "text": "\\begin{equation}\n\\text{les résultats montrent} = 1\n\\end{equation}\n% Les résultats montrent cette phrase uniquement dans un commentaire.\nL'étude décrit ensuite un exemple fictif.",
+    "expected_codes": [],
+    "expected_citation_count": 0,
+    "note": "Marker-like text in displayed math and a TeX comment is excluded; the final ASCII-apostrophe French method sentence remains ordinary prose."
+  },
+  {
+    "id": "fr-abbreviation-and-decimal-control",
+    "language": "fr",
+    "text": "M. Moreau a noté 2,5 unités pendant l’essai fictif. La procédure reste décrite sans référence à un résultat.",
+    "expected_codes": [],
+    "note": "French abbreviation and decimal punctuation should not create false sentence boundaries or source cues."
+  },
+  {
+    "id": "en-bare-url-support-cue",
+    "language": "en",
+    "text": "The results show a larger change in the fictional sample https://example.invalid/results.",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 1,
+    "note": "A visible URL should be reported as a cue only; the tool must never fetch or validate the destination."
+  },
+  {
+    "id": "en-inline-math-phrase-ignored",
+    "language": "en",
+    "source_format": "tex",
+    "text": "The fictional equation is $x = \\text{the results show} + 1$ and is followed by a plain explanatory note.",
+    "expected_codes": [],
+    "note": "Marker-looking words inside inline math are notation, not prose reporting a result."
+  },
+  {
+    "id": "en-display-math-and-comment-ignored",
+    "language": "en",
+    "source_format": "tex",
+    "text": "\\begin{equation}\n\\text{the results show} = 1\n\\end{equation}\n% The results show this comment is not visible prose.\nThe example ends here.",
+    "expected_codes": [],
+    "note": "Marker-looking content in a display-math environment and a LaTeX comment should not be interpreted as prose."
+  },
+  {
+    "id": "en-nested-and-multiple-tex-citations",
+    "language": "en",
+    "source_format": "tex",
+    "text": "The results show a larger change in the fictional sample \\cite[see {detail}][p. 4]{invented-one} and \\parencite{invented-two}.",
+    "expected_codes": ["citation_context_prompt"],
+    "expected_citation_count": 2,
+    "note": "Two visible TeX citations with nested optional arguments should stay mapped to the same sentence."
+  }
+]

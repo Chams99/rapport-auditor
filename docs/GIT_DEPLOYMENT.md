@@ -1,0 +1,121 @@
+# Private GitHub repository and manual VPS updates
+
+Rapport Auditor is prepared for the private repository `Chams99/rapport-auditor`. The VPS uses a repository-scoped, read-only deploy key to fetch source. There is no GitHub Actions workflow or automatic deployment: publishing a change and updating the VPS are separate, manual steps.
+
+This candidate has no `LICENSE`/`COPYING` file or license metadata. Keep it private and do not infer public redistribution rights from the GitHub repository.
+
+## Create the private repository once
+
+Run this from the reviewed clean checkout on Windows after its initial commit is approved. The authenticated GitHub account should be `Chams99`; the login command prints only the account name. Stop if the working tree is dirty, the account differs, or any remote already exists.
+
+```powershell
+Set-Location 'D:\1_DEV\1_A1_UNIVERSITY\0_PFE\rapport-auditor'
+git status --short
+git remote
+gh api user --jq .login
+
+# Run once, after reviewing the source and commit.
+gh repo create Chams99/rapport-auditor --private --source . --remote origin --push
+gh repo view Chams99/rapport-auditor --json name,isPrivate,url
+git rev-parse HEAD
+git ls-remote --symref origin HEAD
+```
+
+Confirm the final metadata reports `isPrivate: true`, and that `ls-remote` reports the approved candidate SHA on the default branch. Do not publish this project to the portfolio repository or to the existing `python-Latex` repository. `gh repo create` creates the private remote and pushes the reviewed local branch; it does not configure deployment.
+
+## Give the VPS read-only access
+
+From the operator's normal terminal, connect to the VPS and generate a dedicated key there. Generate it once, under the same Linux account that will own the checkout. The private key stays on the VPS and should never be copied into chat, source control, or GitHub.
+
+```sh
+ssh my-vps
+umask 077
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+ssh-keygen -t ed25519 -f "$HOME/.ssh/rapport-auditor-readonly" -C "rapport-auditor VPS read-only" -N ""
+chmod 600 "$HOME/.ssh/rapport-auditor-readonly"
+cat "$HOME/.ssh/rapport-auditor-readonly.pub"
+```
+
+In GitHub, open **Chams99/rapport-auditor → Settings → Deploy keys → Add deploy key**. Paste only the `.pub` value, use a recognizable title such as `Rapport VPS read-only`, and leave **Allow write access** unchecked. A deploy key is attached to one repository, and its private half stays on the server. This passphrase-free key is a persistent read-only credential; limit VPS account access and remove the key from GitHub if the VPS is retired or compromised. See [GitHub's deploy-key instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys).
+
+Add this host alias once to `~/.ssh/config` on the VPS so Git uses only this repository's key:
+
+```sshconfig
+Host github-rapport-auditor
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/rapport-auditor-readonly
+  IdentitiesOnly yes
+```
+
+Restrict the config file and test the connection:
+
+```sh
+chmod 600 "$HOME/.ssh/config"
+ssh -T git@github-rapport-auditor
+```
+
+On the first connection, compare the displayed GitHub SSH host-key fingerprint with [GitHub's published fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints) before accepting it. A successful `ssh -T` greeting says GitHub authenticated the key; GitHub does not provide shell access, so the command can exit with status 1.
+
+## Clone and update the checkout
+
+Keep the Rapport checkout separate from the portfolio checkout. Clone it under the operator account's home directory:
+
+```sh
+mkdir -p "$HOME/services"
+git clone git@github-rapport-auditor:Chams99/rapport-auditor.git "$HOME/services/rapport-auditor"
+cd "$HOME/services/rapport-auditor"
+git status --short
+
+# Replace this value with the reviewed initial commit SHA supplied by the maintainer.
+RAPPORT_RELEASE_SHA='replace-with-reviewed-commit-sha'
+git fetch origin main --prune
+git show --no-patch --oneline "$RAPPORT_RELEASE_SHA"
+git switch --detach "$RAPPORT_RELEASE_SHA"
+test "$(git rev-parse HEAD)" = "$RAPPORT_RELEASE_SHA"
+git status --short
+```
+
+For a later source update, stop if `git status --short` reports local changes. Save the current known-good commit SHA, fetch `main`, and switch to the reviewed immutable commit SHA supplied by the maintainer:
+
+```sh
+cd "$HOME/services/rapport-auditor"
+git status --short
+PREVIOUS_SHA=$(git rev-parse HEAD)
+printf 'Previous deployment SHA: %s\n' "$PREVIOUS_SHA"
+git fetch origin --prune
+# Replace this value with the reviewed commit SHA for the update.
+RAPPORT_RELEASE_SHA='replace-with-reviewed-commit-sha'
+git show --no-patch --oneline "$RAPPORT_RELEASE_SHA"
+git switch --detach "$RAPPORT_RELEASE_SHA"
+test "$(git rev-parse HEAD)" = "$RAPPORT_RELEASE_SHA"
+```
+
+Compare the selected commit with the approved SHA before building. Record `PREVIOUS_SHA` for rollback. The deploy key is read-only, so it cannot push changes from the VPS. To publish a later change, review and push it from the trusted development checkout. A push alone does not change the running service.
+
+## Apply an update manually
+
+First complete the live network, exact Traefik peer-IP, DNS/TLS, forwarding-header, access-log, timeout, and host-capacity checks in [the co-hosting runbook](COHOSTING.md). Fill in the ignored `deployment/.env.traefik` using the live values and keep the secret on the VPS. Do not copy secret values into shell history, chat, or Git.
+
+After fetching the reviewed commit, use the documented Rapport-only Compose profile from the Rapport checkout. These commands verify required settings, build the app image, and apply the update; they do not deploy the portfolio:
+
+```sh
+cd "$HOME/services/rapport-auditor"
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml config --quiet
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml build app
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml up -d
+docker compose --project-name rapport-auditor-traefik --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml ps
+```
+
+Only run `build` and `up` after the runbook's preflight passes and `config --quiet` succeeds. Then perform the external HTTPS, synthetic POST, forwarded-IP/quota, readiness, and resource checks there. Do not announce the service from a successful build or `ps` output alone. For rollback, use the Rapport-only command in the runbook; never run the portfolio deployment script for this app.
+
+If the candidate fails after the update, replace the value below with the saved previous SHA and repeat the same quiet config, app build, and Compose `up` commands:
+
+```sh
+PREVIOUS_SHA='replace-with-saved-previous-commit-sha'
+git switch --detach "$PREVIOUS_SHA"
+test "$(git rev-parse HEAD)" = "$PREVIOUS_SHA"
+```
+
+Do not use `git reset --hard`, force-push, or remove the Redis volume during rollback.
