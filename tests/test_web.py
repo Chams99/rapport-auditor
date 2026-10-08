@@ -3,10 +3,11 @@ from __future__ import annotations
 import io
 from html.parser import HTMLParser
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from conftest import LOCAL_ORIGIN, form_csrf_token
-from rapport_auditor.review import audit_text
+from rapport_auditor.review import audit_text, audit_text_deep
 from rapport_api.app import _static_asset_versions
 
 
@@ -25,10 +26,8 @@ class _WebMarkupProbe(HTMLParser):
     def handle_starttag(self, tag, attrs):
         values = dict(attrs)
         identifier = values.get("id")
-        if identifier in {"load-example", "remove-file", "clear-text", "character-count", "editor-state-text"}:
+        if identifier in {"load-example", "remove-file", "clear-text", "character-count", "report-file", "file-chip", "copy-sample"}:
             self.controls[identifier] = values
-        if tag == "span" and "editor-state" in (values.get("class") or "").split():
-            self.controls["editor-state"] = values
         if tag == "textarea" and identifier:
             self.controls[identifier] = values
             self._capturing_textarea = identifier
@@ -42,7 +41,9 @@ class _WebMarkupProbe(HTMLParser):
         if tag == "link" and values.get("rel") == "stylesheet" and values.get("href"):
             self.assets["style.css"] = values["href"]
         if tag == "script" and values.get("src"):
-            self.assets["app.js"] = values["src"]
+            filename = Path(urlsplit(values["src"]).path).name
+            if filename in {"theme.js", "app.js"}:
+                self.assets[filename] = values["src"]
         if values.get("role"):
             self.roles.add(values["role"])
 
@@ -94,7 +95,7 @@ def test_static_assets_are_fingerprinted_on_home_and_error_pages(client, tmp_pat
         for response in (home, error):
             probe = _WebMarkupProbe()
             probe.feed(response.get_data(as_text=True))
-            assert set(probe.assets) == {"style.css", "app.js"}
+            assert set(probe.assets) == {"theme.js", "style.css", "app.js"}
             for filename, url in probe.assets.items():
                 parsed = urlsplit(url)
                 assert parsed.scheme == "" and parsed.netloc == ""
@@ -111,12 +112,15 @@ def test_static_assets_are_fingerprinted_on_home_and_error_pages(client, tmp_pat
     assets_dir.mkdir()
     (assets_dir / "style.css").write_text("body { color: black; }", encoding="utf-8")
     (assets_dir / "app.js").write_text("document.documentElement.dataset.ready = 'yes';", encoding="utf-8")
+    (assets_dir / "theme.js").write_text("document.documentElement.dataset.theme = 'light';", encoding="utf-8")
     before = _static_asset_versions(assets_dir)
     (assets_dir / "style.css").write_text("body { color: navy; }", encoding="utf-8")
     (assets_dir / "app.js").write_text("document.documentElement.dataset.ready = 'changed';", encoding="utf-8")
+    (assets_dir / "theme.js").write_text("document.documentElement.dataset.theme = 'dark';", encoding="utf-8")
     after = _static_asset_versions(assets_dir)
     assert after["style.css"] != before["style.css"]
     assert after["app.js"] != before["app.js"]
+    assert after["theme.js"] != before["theme.js"]
 
 
 def test_enhanced_controls_are_hidden_without_javascript(client):
@@ -127,10 +131,30 @@ def test_enhanced_controls_are_hidden_without_javascript(client):
         probe = _WebMarkupProbe()
         probe.feed(response.get_data(as_text=True))
         assert "hidden" in probe.controls["load-example"]
-        assert "hidden" in probe.controls["remove-file"]
+        assert "hidden" in probe.controls["file-chip"], "the empty file summary should stay hidden without JavaScript"
+        assert "hidden" not in probe.controls["copy-sample"], "manual example instructions remain available without JavaScript"
         assert "hidden" in probe.controls["clear-text"]
+        assert "hidden" not in probe.controls["report-file"], "native file picker must remain available without JavaScript"
         assert "aria-live" not in probe.controls["character-count"]
-        assert probe.controls["editor-state"].get("data-state") == "empty"
+
+
+def test_capped_findings_are_described_as_a_displayed_subset(client):
+    text = "This is a synthetic sentence for the capped-findings template check."
+    report = audit_text_deep(text, content_language="en", source_format="txt")
+    report.findings_total_count = len(report.findings) + 1
+    repetition = type("Repetition", (), {"repeated_starts": [], "repeated_phrases": []})()
+
+    for locale, subset_label, global_label in (
+        ("en", "Not shown among the displayed prompts:", "Also checked, no match:"),
+        ("fr", "Non affichés parmi les pistes visibles :", "Aussi vérifié, sans résultat :"),
+    ):
+        with patch("rapport_api.app._analyze", return_value=(report, repetition, text, False)):
+            response = post_form(client, "/audit", {"text": text, "locale": locale})
+
+        html = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert subset_label in html
+        assert global_label not in html
 
 
 def test_privacy_summary_uses_the_configured_input_byte_and_line_limits(app_factory):

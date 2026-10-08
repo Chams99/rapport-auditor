@@ -1,0 +1,68 @@
+<!doctype html>
+{% set active_locale = 'fr' if locale|default('en') == 'fr' else 'en' %}
+{% set is_fr = active_locale == 'fr' %}
+{% set is_public = is_public_service|default(false) %}
+{% set asset_versions = asset_versions|default({}) %}
+{% import "_checks.html" as checks %}
+{% set page_path = '/about' %}
+<html lang="{{ active_locale }}">
+  <head>
+{% include "_head.html" %}
+    <title>{{ 'Fonctionnement' if is_fr else 'How it works' }} — Rapport Auditor</title>
+  </head>
+  <body class="page-document">
+    <div class="site-shell">
+{% include "_masthead.html" %}
+
+      <main id="main-content" class="page-content doc">
+        <p class="eyebrow">{{ 'Fonctionnement' if is_fr else 'How it works' }}</p>
+        <h1 id="page-title">{{ 'Des pistes de relecture, pas un verdict.' if is_fr else 'Review prompts, not verdicts.' }}</h1>
+        <p class="doc-lede">{{ 'Rapport Auditor lit votre brouillon avec un petit ensemble de règles explicites, en anglais ou en français, et signale les passages qui méritent un second regard. Vous restez seul juge de ce qu’il faut changer.' if is_fr else 'Rapport Auditor reads your draft with a small set of explicit rules, in English or French, and points to passages worth a second look. You decide what, if anything, to change.' }}</p>
+
+        <section class="doc-section" aria-labelledby="steps-title">
+          <h2 id="steps-title">{{ 'En trois étapes' if is_fr else 'Three steps' }}</h2>
+          <ol class="doc-steps">
+            <li><span class="step-number" aria-hidden="true">1</span><div><strong>{{ 'Ajoutez votre texte' if is_fr else 'Add your text' }}</strong><p>{{ 'Collez un passage ou importez un fichier .txt ou .tex en UTF-8, puis choisissez la langue du document.' if is_fr else 'Paste a passage or upload a UTF-8 .txt or .tex file, then pick the document language.' }}</p></div></li>
+            <li><span class="step-number" aria-hidden="true">2</span><div><strong>{{ 'Lisez les pistes' if is_fr else 'Read the prompts' }}</strong><p>{{ 'Chaque piste montre l’extrait, la raison du signalement et une question à vous poser. Cliquez sur « Ligne » pour retrouver le passage.' if is_fr else 'Each prompt shows the excerpt, why it was flagged and a question to ask yourself. Select “Line” to jump to the passage.' }}</p></div></li>
+            <li><span class="step-number" aria-hidden="true">3</span><div><strong>{{ 'Décidez' if is_fr else 'Decide' }}</strong><p>{{ 'Révisez dans votre propre fichier. L’aperçu des retouches propose quelques reformulations prudentes, sans jamais modifier votre fichier.' if is_fr else 'Revise in your own file. The style-edit preview suggests a few conservative rewrites and never changes your file.' }}</p></div></li>
+          </ol>
+        </section>
+
+        <section class="doc-section" aria-labelledby="checks-title">
+          <h2 id="checks-title">{{ 'Ce qui est vérifié' if is_fr else 'What it checks' }}</h2>
+          <dl class="check-table">
+            {% for code, pair in checks.code_labels.items() %}
+              <div class="check-row">
+                <dt><span class="type-dot {{ 'kind-source' if code in checks.source_codes else 'kind-writing' }}" aria-hidden="true"></span>{{ pair[1] if is_fr else pair[0] }}</dt>
+                <dd>{{ checks.code_descriptions[code][1] if is_fr else checks.code_descriptions[code][0] }}</dd>
+              </div>
+            {% endfor %}
+          </dl>
+          <p class="section-note">{{ 'Les seuils et les listes de formules sont volontairement courts et identiques pour tous les textes ; une piste peut ne pas s’appliquer à votre discipline.' if is_fr else 'Thresholds and phrase lists are deliberately short and the same for every text; a prompt may not apply to your field.' }}</p>
+        </section>
+
+        <section class="doc-section" aria-labelledby="limits-title">
+          <h2 id="limits-title">{{ 'Ce qui n’est pas vérifié' if is_fr else 'What it does not do' }}</h2>
+          <ul class="doc-list">
+            <li>{{ 'Il ne vérifie pas les faits et ne juge pas si une affirmation est vraie.' if is_fr else 'It does not check facts or judge whether a claim is true.' }}</li>
+            <li>{{ 'Il ne résout pas les références : un repère de citation visible ne prouve ni que la source existe ni qu’elle étaye la phrase.' if is_fr else 'It does not resolve references: a visible citation does not show that the source exists or supports the sentence.' }}</li>
+            <li>{{ 'Ce n’est ni un correcteur grammatical, ni un détecteur de plagiat ou de texte généré.' if is_fr else 'It is not a grammar checker, a plagiarism checker or an AI-text detector.' }}</li>
+            <li>{{ 'Les règles anglaises et françaises sont distinctes et limitées ; elles ne couvrent pas les autres langues.' if is_fr else 'The English and French rule sets are separate and narrow; other languages are not covered.' }}</li>
+          </ul>
+        </section>
+
+        <section class="doc-section" aria-labelledby="privacy-title">
+          <h2 id="privacy-title"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>{{ 'Confidentialité' if is_fr else 'Privacy' }}</h2>
+          <p>{% if is_public %}{{ 'Votre texte est envoyé à ce serveur et traité en mémoire. L’application ne le conserve pas intentionnellement après traitement. La configuration des journaux d’hébergement, des sauvegardes et de leur conservation n’a pas été vérifiée. Utilisez l’exemple fictif ou un texte non sensible.' if is_fr else 'Your text is sent to this server and processed in memory. The app does not intentionally retain it after processing. Hosting logs, backups and their retention settings have not been verified. Use the fictional example or non-sensitive text.' }}{% else %}{{ 'Votre texte est traité par ce serveur local et n’est pas enregistré volontairement par l’application après traitement. Le système d’exploitation ou le navigateur peut néanmoins conserver des copies temporaires.' if is_fr else 'Your text is processed by this local server and is not intentionally stored by the app after processing. The operating system or browser may still keep temporary copies.' }}{% endif %} {{ 'Aucun service d’écriture, d’IA ou d’analyse tiers n’est appelé.' if is_fr else 'No third-party writing, AI or analytics service is called.' }}</p>
+        </section>
+
+        <p class="doc-cta"><a class="button button-primary" href="/?locale={{ active_locale }}"><svg class="icon" aria-hidden="true"><use href="#i-back"/></svg>{{ 'Ouvrir l’éditeur' if is_fr else 'Open the editor' }}</a></p>
+      </main>
+
+      <footer class="page-footer">
+        <svg class="brand-logo" width="24" height="24" aria-hidden="true" focusable="false"><use href="#logo-mark"/></svg>
+        <p>{{ 'Un atelier de lecture et de révision pour le travail académique. Conçu pour soutenir votre jugement éditorial.' if is_fr else 'A reading and revision desk for academic work. Built to support your editorial judgment.' }}</p>
+      </footer>
+    </div>
+  </body>
+</html>

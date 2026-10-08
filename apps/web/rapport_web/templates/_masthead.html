@@ -1,0 +1,48 @@
+    {# One icon set (Lucide-style 24px strokes) so every glyph shares weight and size,
+       plus the brand mark: a margin bracket with a reviewer's check. #}
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <symbol id="logo-mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#4b3fc4"/><path d="M12.5 8H9v16h3.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 16.5l3.5 3.5 6.5-8" fill="none" stroke="#ffd166" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7.4 18.6a2 2 0 0 1-.9.5l-2.9.9.9-2.9a2 2 0 0 1 .5-.9z"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    </svg>
+
+    <a class="skip-link" href="#main-content">{{ 'Aller au contenu principal' if is_fr else 'Skip to main content' }}</a>
+
+    <header class="masthead">
+      <a class="brand" href="/?locale={{ active_locale }}" aria-label="Rapport Auditor — {{ 'accueil' if is_fr else 'home' }}">
+        <svg class="brand-logo" width="36" height="36" aria-hidden="true" focusable="false"><use href="#logo-mark"/></svg>
+        <span class="brand-name" translate="no">Rapport<span>Auditor</span></span>
+      </a>
+      <div class="masthead-meta">
+        <span class="session-label"><span class="status-dot" aria-hidden="true"></span>{{ ('Service public' if is_fr else 'Public service') if is_public else ('Service local' if is_fr else 'Local service') }}</span>
+        <a class="masthead-link" href="/about?locale={{ active_locale }}" {% if page_path == '/about' %}aria-current="page"{% endif %}>
+          <svg class="icon" aria-hidden="true"><use href="#i-help"/></svg><span class="masthead-link-text">{{ 'Fonctionnement' if is_fr else 'How it works' }}</span>
+        </a>
+        <button class="icon-button theme-toggle" type="button" data-theme-toggle hidden data-label-system="{{ 'Thème : système' if is_fr else 'Theme: system' }}" data-label-light="{{ 'Thème : clair' if is_fr else 'Theme: light' }}" data-label-dark="{{ 'Thème : sombre' if is_fr else 'Theme: dark' }}" aria-label="{{ 'Thème : système' if is_fr else 'Theme: system' }}">
+          <svg class="icon theme-icon-system" aria-hidden="true"><use href="#i-monitor"/></svg><svg class="icon theme-icon-light" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon theme-icon-dark" aria-hidden="true"><use href="#i-moon"/></svg>
+        </button>
+        <nav class="locale-switch" aria-label="{{ 'Langue de l’interface' if is_fr else 'Interface language' }}">
+          <a href="{{ page_path }}?locale=en" lang="en" hreflang="en" {% if not is_fr %}aria-current="page"{% endif %}>EN</a>
+          <a href="{{ page_path }}?locale=fr" lang="fr" hreflang="fr" {% if is_fr %}aria-current="page"{% endif %}>FR</a>
+        </nav>
+      </div>
+    </header>

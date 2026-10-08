@@ -114,10 +114,9 @@ async function main() {
         check(await page.locator("html").getAttribute("lang") === locale, `${locale}: html lang mismatch`);
         check(await page.locator("h1").count() === 1, `${locale}: expected one h1`);
         check(await page.locator("#report-text").count() === 1, `${locale}: missing labelled editor`);
-        check(await page.locator(".editor-state").getAttribute("data-state") === "empty", `${locale}: empty editor state is inaccurate`);
-        check((await page.locator("#editor-state-text").innerText()).length > 0, `${locale}: editor state needs visible guidance`);
+        check(await page.locator("html").evaluate((element) => element.classList.contains("js-ready")), `${locale}: file picker enhancement did not initialize`);
+        check(await page.locator("#file-chip").isHidden(), `${locale}: empty file chip should remain hidden`);
         check(await page.locator("#remove-file").isHidden(), `${locale}: file removal should stay hidden without a selected file`);
-        check(await page.locator("#results-stale").isHidden(), `${locale}: empty home page must not claim results are stale`);
         check(
           await page.evaluate(() => document.activeElement?.id) !== "results-heading",
           `${locale}/${width}: idle page must not steal focus to the results heading`,
@@ -139,7 +138,7 @@ async function main() {
             ["English locale link", 'a[hreflang="en"]'],
             ["French locale link", 'a[hreflang="fr"]'],
             ["document-language selector", "#content-language"],
-            ["upload picker label", 'label[for="report-file"]'],
+            ["upload picker label", "label.upload-button"],
             ["source format select", "#source-format"],
             ["fictional example action", "#load-example"],
             ["clear input", "#clear-text"],
@@ -181,8 +180,8 @@ async function main() {
     await page.setViewportSize({ width: 640, height: 900 });
     await page.goto(`${baseUrl}/?locale=fr`, { waitUntil: "networkidle" });
     check(await page.locator("#load-example").isVisible(), "French sample action should be visible after enhancement");
-    check((await page.locator("#load-example").innerText()).includes("Essayer l’exemple fictif"), "French sample action label is incorrect");
-    check(await page.locator("#copy-sample").isHidden(), "the manual-copy fallback should hide when the French sample action is enhanced");
+    check((await page.locator("#load-example").innerText()).includes("Exemple fictif"), "French sample action label is incorrect");
+    check(await page.locator("#copy-sample").isHidden(), "the manual-copy disclosure should hide after the French sample action is enhanced");
     verifyNoHorizontalOverflow(
       await page.evaluate(() => ({
         viewportWidth: document.documentElement.clientWidth,
@@ -198,8 +197,8 @@ async function main() {
     const loadExample = page.locator("#load-example");
     check((await editor.inputValue()) === "", "the initial page must not preload sample text");
     check(await loadExample.isVisible(), "the sample action should be visible after JavaScript enhancement");
-    check((await loadExample.innerText()).includes("Try fictional example"), "English sample action label is incorrect");
-    check(await page.locator("#copy-sample").isHidden(), "the manual-copy fallback should hide when the English sample action is enhanced");
+    check((await loadExample.innerText()).includes("Synthetic example"), "English sample action label is incorrect");
+    check(await page.locator("#copy-sample").isHidden(), "the manual-copy disclosure should hide after the English sample action is enhanced");
     await loadExample.click();
     const example = await editor.inputValue();
     check(example.length > 0, "the explicit synthetic-example action did not load text");
@@ -237,24 +236,22 @@ async function main() {
     check(await page.locator("#source-format").inputValue() === "tex", "removing an upload did not restore the pasted format");
     check(await page.locator("#source-format").isEnabled(), "pasted format should be enabled after removing a file");
 
-    let clearDismissed;
-    page.once("dialog", async (dialog) => {
-      clearDismissed = dialog.type();
-      await dialog.dismiss();
+    await page.locator("#report-file").setInputFiles({
+      name: "synthetic-upload.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("SYNTHETIC TEST — file selection only; no personal content."),
     });
     await page.locator("#clear-text").click();
-    check(clearDismissed === "confirm", "clearing existing text should require confirmation");
-    check((await editor.inputValue()) === example, "canceling Clear discarded the draft");
-    let clearAccepted;
-    page.once("dialog", async (dialog) => {
-      clearAccepted = dialog.type();
-      await dialog.accept();
-    });
+    check((await editor.inputValue()) === "", "Clear did not empty the editor");
+    check(await page.locator("#file-chip").isHidden(), "Clear did not remove the selected-file summary");
+    check((await page.locator("#clear-text").innerText()).includes("Undo"), "Clear should offer a short Undo action");
     await page.locator("#clear-text").click();
-    check(clearAccepted === "confirm", "Clear did not show its confirmation");
-    check((await editor.inputValue()) === "", "confirmed Clear did not empty the editor");
-    check(await page.locator(".editor-state").getAttribute("data-state") === "empty", "Clear did not restore the empty state");
-    check(await page.locator("#results-stale").isHidden(), "editing the home page should not mark nonexistent results stale");
+    check((await editor.inputValue()) === example, "Undo did not restore the draft");
+    check(await page.locator("#file-chip").isVisible(), "Undo did not restore the selected-file summary");
+    check((await page.locator("#file-name").innerText()) === "synthetic-upload.txt", "Undo did not restore the selected filename");
+    check(await page.locator("#source-format").isDisabled(), "Undo did not restore upload-format locking");
+    await page.locator("#remove-file").click();
+    check((await editor.inputValue()) === example, "removing the restored upload discarded pasted text");
 
     const baseline = fs.readFileSync(path.join(syntheticDir, "baseline_en.txt"), "utf8");
     await editor.fill(baseline);
@@ -286,8 +283,7 @@ async function main() {
       await page.evaluate(() => document.activeElement?.id) === "results-heading",
       "audit response did not focus the results heading",
     );
-    await editor.fill(`${baseline}\nA synthetic local edit makes these results stale.`);
-    check(await page.locator("#results-stale").isVisible(), "editing a result page must mark its existing results stale");
+    await editor.fill(`${baseline}\nA synthetic local edit is retained only in this page.`);
     await editor.fill(baseline);
     axePasses += await verifyA11y(page, "English audit results");
     await page.screenshot({ path: path.join(screenshotDir, "synthetic-result-en-1440.png"), fullPage: true });
@@ -338,22 +334,23 @@ async function main() {
       findingsText.includes("Check that the cited work supports this specific statement"),
       "findings example did not show the citation-context prompt",
     );
-    const reviewFilters = findingsPage.locator("#review-filters");
-    check(await reviewFilters.isVisible(), "categorized findings should reveal the filter controls with JavaScript");
-    check(await findingsPage.locator('#review-filters [data-review-filter="all"]').getAttribute("aria-pressed") === "true", "All should be the initial pressed filter");
-    const writingCards = findingsPage.locator('.prompt-card[data-review-category="writing"]');
-    const sourceCards = findingsPage.locator('.prompt-card[data-review-category="source"]');
-    check((await writingCards.count()) > 0 && (await sourceCards.count()) > 0, "synthetic fixture needs both prompt categories");
-    await findingsPage.locator('#review-filters [data-review-filter="writing"]').click();
-    check(await findingsPage.locator('#review-filters [data-review-filter="writing"]').getAttribute("aria-pressed") === "true", "writing filter did not update aria-pressed");
-    check(await writingCards.first().isVisible(), "writing filter hid a writing prompt");
-    check(await sourceCards.first().isHidden(), "writing filter should hide source prompts");
-    check(await findingsPage.locator(".citation-card").first().getAttribute("hidden") === null, "filters must not add hidden state to the separate citation inventory");
-    check((await findingsPage.locator("#filter-status").innerText()).includes("displayed prompts"), "filter status should explain the displayed subset");
-    await findingsPage.locator('#review-filters [data-review-filter="source"]').click();
-    check(await sourceCards.first().isVisible(), "source filter hid a source prompt");
-    check(await writingCards.first().isHidden(), "source filter should hide writing prompts");
-    await findingsPage.locator('#review-filters [data-review-filter="all"]').click();
+    const overview = findingsPage.locator("[data-type-overview]");
+    check(await overview.isVisible(), "categorized findings overview should be present");
+    const promptCards = findingsPage.locator('.content-section[aria-labelledby="passages-heading"] .finding-card');
+    check((await promptCards.count()) > 1, "synthetic fixture needs multiple review prompts");
+    const firstType = overview.locator(".type-item[data-count]").first();
+    const firstCode = await firstType.getAttribute("data-code");
+    const firstTypeButton = firstType.locator(".type-row");
+    await firstTypeButton.click();
+    check(await firstTypeButton.getAttribute("aria-pressed") === "true", "prompt-type filter did not update aria-pressed");
+    check(await findingsPage.locator(`.content-section[aria-labelledby="passages-heading"] .finding-card[data-code="${firstCode}"]`).first().isVisible(), "selected prompt type was hidden");
+    check(
+      await promptCards.evaluateAll((cards, code) => cards.filter((card) => card.dataset.code !== code).every((card) => card.hidden), firstCode),
+      "type filter did not hide the other review prompts",
+    );
+    const citationInventory = findingsPage.locator('.content-section[aria-labelledby="source-checks-heading"] .finding-card');
+    if (await citationInventory.count()) check(await citationInventory.first().isVisible(), "prompt-type filters must not hide the separate citation inventory");
+    await overview.locator("[data-show-all]").click();
     axePasses += await verifyA11y(findingsPage, "English synthetic findings example");
     // This annotation is intentionally screenshot-only: the real parser omits
     // comments/preamble from its result view, so label the captured evidence.
@@ -481,8 +478,9 @@ async function main() {
     const failedScriptPage = await failedScriptContext.newPage();
     await failedScriptPage.goto(`${baseUrl}/?locale=en`, { waitUntil: "networkidle" });
     check(await failedScriptPage.locator("#load-example").isHidden(), "synthetic helper should remain hidden when its script fails");
-    check(await failedScriptPage.locator("#copy-sample").isVisible(), "manual-copy fallback should remain when its script fails");
+    check(await failedScriptPage.locator("#copy-sample").isVisible(), "manual example instructions should remain when their script fails");
     check(await failedScriptPage.locator("#report-text").isVisible(), "native editor should remain visible when its script fails");
+    check(await failedScriptPage.locator("#report-file").isVisible(), "native file picker should remain usable when its script fails");
     await failedScriptContext.close();
 
     // JavaScript-disabled flow: native POST audit, revision, upload, and failed
@@ -493,7 +491,8 @@ async function main() {
     await noJsPage.goto(`${baseUrl}/?locale=fr`, { waitUntil: "networkidle" });
     check(await noJsPage.locator("html").getAttribute("lang") === "fr", "French no-JS page failed");
     check(await noJsPage.locator("#load-example").isHidden(), "sample control should stay hidden without JavaScript");
-    check(await noJsPage.locator("#copy-sample").isVisible(), "manual-copy fallback should remain without JavaScript");
+    check(await noJsPage.locator("#copy-sample").isVisible(), "manual example instructions should remain without JavaScript");
+    check(await noJsPage.locator("#report-file").isVisible(), "native file picker should remain available without JavaScript");
     await noJsPage.locator("#report-text").fill("This chapter presents a fictional method. The sample contains no real research claim.");
     // Native POST acceptance depends on the document arriving, not every
     // optional asset reaching an idle-network heuristic.
@@ -525,9 +524,9 @@ async function main() {
     navigation = noJsPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 });
     await noJsPage.locator('button[formaction="/audit"]').click();
     check((await navigation)?.status() === 200, "JavaScript-disabled synthetic findings audit failed");
-    check(await noJsPage.locator("#review-filters").count() === 1, "categorized no-JS result omitted the progressive enhancement group");
-    check(await noJsPage.locator("#review-filters").isHidden(), "filters should remain hidden without JavaScript");
-    check((await noJsPage.locator(".prompt-card[data-review-category]").count()) > 0, "no-JS prompts should remain visible without filters");
+    check(await noJsPage.locator("[data-type-overview]").count() === 1, "categorized no-JS result omitted the visible type summary");
+    check((await noJsPage.locator('.content-section[aria-labelledby="passages-heading"] .finding-card').count()) > 0, "no-JS prompts should remain visible without filters");
+    check(await noJsPage.locator('.content-section[aria-labelledby="passages-heading"] .type-row').count() === 0, "filter buttons should remain a JavaScript enhancement");
 
     await noJsPage.locator("#report-text").fill("This chapter presents a fictional method with \cite{synthetic-key}.");
     navigation = noJsPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 });
