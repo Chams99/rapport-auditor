@@ -161,10 +161,45 @@ def load_environment(environ: Mapping[str, str] | None = None) -> dict[str, Any]
             "RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS", env.get("RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS", "30"), maximum=10_000
         ),
         "RATE_LIMIT_WINDOW_SECONDS": _positive_int(
-            "RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS", env.get("RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS", "60"), maximum=3600
+            "RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS", env.get("RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS", "60"), maximum=60
         ),
         "RATE_LIMIT_MAX_CLIENTS": _positive_int(
-            "RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS", env.get("RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS", "4096"), maximum=100_000
+            "RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS", env.get("RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS", "4096"), maximum=4096
+        ),
+        "REVIEW_ATTEMPT_MAX_REQUESTS": _positive_int(
+            "RAPPORT_AUDITOR_REVIEW_ATTEMPT_MAX_REQUESTS",
+            env.get("RAPPORT_AUDITOR_REVIEW_ATTEMPT_MAX_REQUESTS", "60"),
+            maximum=60,
+        ),
+        "RATE_LIMIT_HOURLY_MAX_REQUESTS": _positive_int(
+            "RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_MAX_REQUESTS",
+            env.get("RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_MAX_REQUESTS", "100"),
+            maximum=100,
+        ),
+        "RATE_LIMIT_HOURLY_WINDOW_SECONDS": _positive_int(
+            "RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_WINDOW_SECONDS",
+            env.get("RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_WINDOW_SECONDS", "3600"),
+            maximum=3600,
+        ),
+        "ANALYSIS_BUDGET_SECONDS": _positive_int(
+            "RAPPORT_AUDITOR_ANALYSIS_BUDGET_SECONDS",
+            env.get("RAPPORT_AUDITOR_ANALYSIS_BUDGET_SECONDS", "30"),
+            maximum=300,
+        ),
+        "ANALYSIS_BUDGET_WINDOW_SECONDS": _positive_int(
+            "RAPPORT_AUDITOR_ANALYSIS_BUDGET_WINDOW_SECONDS",
+            env.get("RAPPORT_AUDITOR_ANALYSIS_BUDGET_WINDOW_SECONDS", "60"),
+            maximum=60,
+        ),
+        "ANALYSIS_BUDGET_RESERVATION_SECONDS": _positive_int(
+            "RAPPORT_AUDITOR_ANALYSIS_BUDGET_RESERVATION_SECONDS",
+            env.get("RAPPORT_AUDITOR_ANALYSIS_BUDGET_RESERVATION_SECONDS", "11"),
+            maximum=31,
+        ),
+        "ANALYSIS_BUDGET_MAX_ADMISSIONS": _positive_int(
+            "RAPPORT_AUDITOR_ANALYSIS_BUDGET_MAX_ADMISSIONS",
+            env.get("RAPPORT_AUDITOR_ANALYSIS_BUDGET_MAX_ADMISSIONS", "60"),
+            maximum=60,
         ),
         "RATE_LIMIT_NAMESPACE": env.get("RAPPORT_AUDITOR_RATE_LIMIT_NAMESPACE", "rapport-auditor:prod"),
         "REDIS_TIMEOUT_SECONDS": _bounded_float(
@@ -229,6 +264,16 @@ def load_environment(environ: Mapping[str, str] | None = None) -> dict[str, Any]
             raise ConfigurationError("RAPPORT_AUDITOR_HOST must be an IP bind address")
         if defaults["WORKER_CPU_SECONDS"] >= defaults["ANALYSIS_TIMEOUT_SECONDS"]:
             raise ConfigurationError("Worker CPU limit must be below its wall-clock timeout")
+        if defaults["RATE_LIMIT_WINDOW_SECONDS"] > defaults["RATE_LIMIT_HOURLY_WINDOW_SECONDS"]:
+            raise ConfigurationError("RATE_LIMIT_WINDOW_SECONDS cannot exceed the hourly review window")
+        if defaults["ANALYSIS_BUDGET_SECONDS"] < defaults["ANALYSIS_BUDGET_RESERVATION_SECONDS"]:
+            raise ConfigurationError("Analysis budget must cover one full reservation")
+        if defaults["ANALYSIS_BUDGET_WINDOW_SECONDS"] < defaults["RATE_LIMIT_WINDOW_SECONDS"]:
+            raise ConfigurationError("Analysis budget window cannot be shorter than the review window")
+        if defaults["ANALYSIS_BUDGET_WINDOW_SECONDS"] < defaults["ANALYSIS_BUDGET_RESERVATION_SECONDS"]:
+            raise ConfigurationError("Analysis budget window must cover the full reservation")
+        if defaults["ANALYSIS_BUDGET_RESERVATION_SECONDS"] < defaults["ANALYSIS_TIMEOUT_SECONDS"] + 1:
+            raise ConfigurationError("Analysis budget reservation must cover the worker timeout and cleanup margin")
         if not supports_resource_limits():
             raise ConfigurationError("The server profile requires POSIX process resource limits")
         defaults["COOKIE_SECURE"] = True
@@ -257,8 +302,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
         "WAITRESS_OUTBUF_OVERFLOW": 24_000_000,
         "CSRF_TOKEN_MAX_AGE": 3600,
         "RATE_LIMIT_MAX_REQUESTS": 10_000,
-        "RATE_LIMIT_WINDOW_SECONDS": 3600,
-        "RATE_LIMIT_MAX_CLIENTS": 100_000,
+        "RATE_LIMIT_WINDOW_SECONDS": 60,
+        "RATE_LIMIT_MAX_CLIENTS": 4096,
+        "REVIEW_ATTEMPT_MAX_REQUESTS": 60,
+        "RATE_LIMIT_HOURLY_MAX_REQUESTS": 100,
+        "RATE_LIMIT_HOURLY_WINDOW_SECONDS": 3600,
+        "ANALYSIS_BUDGET_SECONDS": 300,
+        "ANALYSIS_BUDGET_WINDOW_SECONDS": 60,
+        "ANALYSIS_BUDGET_RESERVATION_SECONDS": 31,
+        "ANALYSIS_BUDGET_MAX_ADMISSIONS": 60,
         "ANALYSIS_MAX_WORKERS": 8,
         "WORKER_MEMORY_MB": 2048,
         "WORKER_CPU_SECONDS": 30,
@@ -297,6 +349,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
     overhead = 32_768
     if config["MAX_CONTENT_LENGTH"] < max(config["MAX_INPUT_BYTES"], config["MAX_UPLOAD_BYTES"]) + overhead:
         raise ConfigurationError("MAX_CONTENT_LENGTH must reserve space for request framing")
+    if config["RATE_LIMIT_WINDOW_SECONDS"] > config["RATE_LIMIT_HOURLY_WINDOW_SECONDS"]:
+        raise ConfigurationError("RATE_LIMIT_WINDOW_SECONDS cannot exceed the hourly review window")
+    if config["ANALYSIS_BUDGET_SECONDS"] < config["ANALYSIS_BUDGET_RESERVATION_SECONDS"]:
+        raise ConfigurationError("ANALYSIS_BUDGET_SECONDS must cover one full reservation")
+    if config["ANALYSIS_BUDGET_WINDOW_SECONDS"] < config["RATE_LIMIT_WINDOW_SECONDS"]:
+        raise ConfigurationError("ANALYSIS_BUDGET_WINDOW_SECONDS cannot be shorter than the review window")
+    if config["ANALYSIS_BUDGET_WINDOW_SECONDS"] < config["ANALYSIS_BUDGET_RESERVATION_SECONDS"]:
+        raise ConfigurationError("ANALYSIS_BUDGET_WINDOW_SECONDS must cover the full reservation")
     if config.get("APP_MODE") == "server":
         if not config["COOKIE_SECURE"]:
             raise ConfigurationError("Secure cookies are mandatory in server mode")
@@ -316,6 +376,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ConfigurationError("The server bind host must be an IP address")
         if config["WORKER_CPU_SECONDS"] >= config["ANALYSIS_TIMEOUT_SECONDS"]:
             raise ConfigurationError("Worker CPU limit must be below its wall-clock timeout")
+        if config["ANALYSIS_BUDGET_RESERVATION_SECONDS"] < config["ANALYSIS_TIMEOUT_SECONDS"] + 1:
+            raise ConfigurationError("Analysis budget reservation must cover the worker timeout and cleanup margin")
         try:
             normalized_hosts = tuple(normalize_host(host) for host in config["TRUSTED_HOSTS"])
             normalized_origins = tuple(normalize_https_origin(origin) for origin in config["TRUSTED_ORIGINS"])

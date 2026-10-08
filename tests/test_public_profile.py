@@ -30,8 +30,19 @@ class _ReadinessLimiter:
     def check(self, _identity: str):
         return True, 60, 29
 
+    def check_early_attempt(self, _identity: str):
+        return True, 60, 59
+
     def ready(self) -> bool:
         return self._ready
+
+
+class _OpenAnalysisBudget:
+    def reserve(self):
+        return "a" * 32
+
+    def settle(self, _lease: str, _elapsed_ms: int) -> None:
+        return None
 
 
 class _UnavailableLimiter:
@@ -80,6 +91,11 @@ def _valid_server_env() -> dict[str, str]:
         ("RAPPORT_AUDITOR_TRUSTED_PROXY", "10.89.0.0/24", "exact proxy IP"),
         ("RAPPORT_AUDITOR_HOST", "attacker-host", "IP bind address"),
         ("RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS", "0", "supported range"),
+        ("RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS", "4097", "supported range"),
+        ("RAPPORT_AUDITOR_ANALYSIS_BUDGET_MAX_ADMISSIONS", "61", "supported range"),
+        ("RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_WINDOW_SECONDS", "30", "hourly review window"),
+        ("RAPPORT_AUDITOR_ANALYSIS_BUDGET_SECONDS", "10", "cover one full reservation"),
+        ("RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS", "11", "cleanup margin"),
         ("RAPPORT_AUDITOR_WORKER_CPU_SECONDS", "10", "CPU limit"),
     ],
 )
@@ -103,6 +119,11 @@ def test_server_profile_accepts_complete_linux_configuration_and_canonicalizes_o
     assert loaded["COOKIE_SECURE"] is True
     assert loaded["TRUSTED_ORIGINS"] == (PUBLIC_ORIGIN,)
     assert loaded["TRUSTED_PROXY"] == PROXY_IP
+    assert loaded["RATE_LIMIT_MAX_REQUESTS"] == 30
+    assert loaded["RATE_LIMIT_HOURLY_MAX_REQUESTS"] == 100
+    assert loaded["REVIEW_ATTEMPT_MAX_REQUESTS"] == 60
+    assert loaded["ANALYSIS_BUDGET_SECONDS"] == 30
+    assert loaded["ANALYSIS_BUDGET_RESERVATION_SECONDS"] == 11
 
 
 def _server_test_app(*, limiter_ready: bool = True):
@@ -117,10 +138,30 @@ def _server_test_app(*, limiter_ready: bool = True):
             "TRUSTED_PROXY": PROXY_IP,
             "REDIS_URL": "redis://redis.internal.test:6379/0",
             "RATE_LIMITER": _ReadinessLimiter(limiter_ready),
+            "REVIEW_QUOTA": _ReadinessLimiter(limiter_ready),
+            "EARLY_ATTEMPT_LIMITER": _ReadinessLimiter(limiter_ready),
+            "ANALYSIS_BUDGET": _OpenAnalysisBudget(),
             "ANALYSIS_RUNNER": LocalAnalysisRunner(),
         }
     )
     return app
+
+
+def test_server_limiter_override_requires_explicit_new_guard_fakes(mock_posix_capability):
+    config = {
+        "TESTING": True,
+        "APP_MODE": "server",
+        "SECRET_KEY": TEST_PUBLIC_SECRET,
+        "COOKIE_SECURE": True,
+        "TRUSTED_HOSTS": (PUBLIC_HOST,),
+        "TRUSTED_ORIGINS": (PUBLIC_ORIGIN,),
+        "TRUSTED_PROXY": PROXY_IP,
+        "REDIS_URL": "redis://redis.internal.test:6379/0",
+        "RATE_LIMITER": _ReadinessLimiter(),
+        "ANALYSIS_RUNNER": LocalAnalysisRunner(),
+    }
+    with pytest.raises(ConfigurationError, match="must explicitly inject"):
+        create_app(config)
 
 
 def test_server_profile_sets_secure_cookie_hsts_request_id_and_no_store(mock_posix_capability):
@@ -218,7 +259,7 @@ def test_server_profile_ignores_forged_forwarded_host_for_host_validation(mock_p
 
 def test_server_profile_returns_generic_503_when_shared_limiter_is_unavailable(mock_posix_capability):
     app = _server_test_app()
-    app.extensions["rapport_auditor.rate_limiter"] = _UnavailableLimiter()
+    app.extensions["rapport_auditor.review_quota"] = _UnavailableLimiter()
     client = app.test_client()
     token = client.get("/api/v1/csrf", base_url=PUBLIC_ORIGIN).get_json()["csrf_token"]
 

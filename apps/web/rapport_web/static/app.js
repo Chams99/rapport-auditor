@@ -119,6 +119,22 @@
     submitFailed: isFr
       ? "Le résultat n’a pas pu être chargé. Votre texte et votre fichier sont toujours ici ; vérifiez la connexion avant de réessayer."
       : "The result could not be loaded. Your text and file are still here; check the connection before retrying.",
+    rateLimited: (seconds) => {
+      if (isFr) return seconds
+        ? `Trop de demandes de relecture. Votre texte et votre fichier sont toujours ici. Réessayez dans ${seconds} s.`
+        : "Trop de demandes de relecture. Votre texte et votre fichier sont toujours ici. Attendez un instant avant de réessayer.";
+      return seconds
+        ? `Too many review requests. Your text and file are still here. Please wait ${seconds} seconds before retrying.`
+        : "Too many review requests. Your text and file are still here. Please wait a moment before retrying.";
+    },
+    serviceUnavailable: (seconds) => {
+      if (isFr) return seconds
+        ? `Le service de relecture est temporairement indisponible. Votre texte et votre fichier sont toujours ici. Réessayez dans ${seconds} s.`
+        : "Le service de relecture est temporairement indisponible. Votre texte et votre fichier sont toujours ici. Réessayez bientôt.";
+      return seconds
+        ? `The review service is temporarily unavailable. Your text and file are still here. Please retry in ${seconds} seconds.`
+        : "The review service is temporarily unavailable. Your text and file are still here. Please try again shortly.";
+    },
     reducedMotion: matchMedia("(prefers-reduced-motion: reduce)"),
   };
 
@@ -541,13 +557,20 @@
       });
       pendingButtonStates = null;
     };
-    const showSubmitFailure = () => {
+    const showSubmitFailure = (message = messages.submitFailed) => {
       if (!statusLabel) return;
       statusLabel.setAttribute("role", "alert");
       statusLabel.setAttribute("aria-live", "assertive");
       statusLabel.classList.remove("visually-hidden");
       statusLabel.textContent = "";
-      setPageTimeout(() => { statusLabel.textContent = messages.submitFailed; }, 30);
+      setPageTimeout(() => { statusLabel.textContent = message; }, 30);
+    };
+
+    const getRetryAfterSeconds = (headers) => {
+      const value = headers?.get("retry-after")?.trim();
+      if (!value || !/^\d+$/.test(value)) return null;
+      const seconds = Number(value);
+      return Number.isFinite(seconds) ? Math.max(1, Math.min(3600, seconds)) : 3600;
     };
 
     const enhancedFetchAvailable = () => (
@@ -666,6 +689,7 @@
     const submitWithFetch = async (submitButton, formData, actionUrl) => {
       const controller = new AbortController();
       const isCurrentRequest = () => activeRequest === controller;
+      let failureMessage = messages.submitFailed;
       activeRequest = controller;
       const timeout = setPageTimeout(() => controller.abort(), 20000);
       activeRequestTimeout = timeout;
@@ -680,7 +704,11 @@
           mode: "same-origin",
           redirect: "error",
           cache: "no-store",
-          headers: { Accept: "text/html" },
+          headers: {
+            Accept: "text/html",
+            "X-Rapport-Locale": isFr ? "fr" : "en",
+            "X-Rapport-Enhanced-Request": "1",
+          },
           signal: controller.signal,
         });
         if (!isCurrentRequest()) return;
@@ -688,6 +716,14 @@
         const responseUrl = new URL(response.url || actionUrl.href, window.location.href);
         if (responseUrl.origin !== new URL(window.location.href).origin || responseUrl.username || responseUrl.password) throw new Error("cross-origin-response");
         if (!["/audit", "/revise"].includes(responseUrl.pathname) || responseUrl.search || responseUrl.hash) throw new Error("unexpected-response-route");
+        if (response.status === 429) {
+          failureMessage = messages.rateLimited(getRetryAfterSeconds(response.headers));
+          throw new Error("rate-limited");
+        }
+        if (response.status === 503) {
+          failureMessage = messages.serviceUnavailable(getRetryAfterSeconds(response.headers));
+          throw new Error("service-unavailable");
+        }
         if ((response.headers?.get("content-type") || "").toLowerCase().split(";")[0].trim() !== "text/html") {
           throw new Error("unexpected-content-type");
         }
@@ -731,7 +767,7 @@
         isEnhancedSubmitting = false;
         isSubmitting = false;
         syncBeforeUnload();
-        showSubmitFailure();
+        showSubmitFailure(failureMessage);
       }
     };
 

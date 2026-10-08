@@ -9,7 +9,12 @@ from rapport_api.security import (
     normalize_client_address,
     verify_csrf_token,
 )
-from rapport_api.limiting import RateLimitUnavailable, RedisSlidingWindowRateLimiter
+from rapport_api.limiting import (
+    AnalysisBudgetExceeded,
+    RateLimitUnavailable,
+    RedisAnalysisWorkBudget,
+    RedisSlidingWindowRateLimiter,
+)
 from redis.exceptions import RedisError
 
 
@@ -105,6 +110,109 @@ def test_redis_limiter_uses_window_retry_and_hmacs_identity():
     assert "192.0.2.27" not in repr(stub.eval_args)
     assert isinstance(stub.eval_args[-1], str)
     assert stub.eval_args[-1] != "192.0.2.27"
+
+
+def test_redis_review_quota_applies_minute_and_hour_limits_in_one_script():
+    stub = _RedisStub([1, 60, 29])
+    limiter = RedisSlidingWindowRateLimiter(
+        redis_url="redis://unused.test/0",
+        secret_key="a-test-secret-that-is-long-enough-for-the-hmac",
+        limit=30,
+        window_seconds=60,
+        hourly_limit=100,
+        hourly_window_seconds=3600,
+        attempt_limit=60,
+        max_clients=128,
+        client=stub,
+    )
+
+    assert limiter.check("192.0.2.27") == (True, 60, 29)
+    assert stub.eval_args is not None
+    assert "redis.call('TIME')" in stub.eval_args[0]
+    assert stub.eval_args[2:9] == (
+        "rapport-auditor:prod:reviews:" + limiter._identity("192.0.2.27"),
+        "rapport-auditor:prod:active:reviews",
+        60_000,
+        3_600_000,
+        30,
+        100,
+        128,
+    )
+
+
+def test_redis_early_attempt_quota_is_distinct_and_bounded_to_one_minute():
+    stub = _RedisStub([0, 44, 0])
+    limiter = RedisSlidingWindowRateLimiter(
+        redis_url="redis://unused.test/0",
+        secret_key="a-test-secret-that-is-long-enough-for-the-hmac",
+        limit=30,
+        window_seconds=60,
+        hourly_limit=100,
+        hourly_window_seconds=3600,
+        attempt_limit=60,
+        max_clients=128,
+        client=stub,
+    )
+
+    assert limiter.check_early_attempt("192.0.2.28") == (False, 44, 0)
+    assert stub.eval_args is not None
+    assert "attempts:" in stub.eval_args[2]
+    assert stub.eval_args[3] == "rapport-auditor:prod:active:attempts"
+    assert stub.eval_args[4:9] == (60_000, 60_000, 60, 128, stub.eval_args[8])
+    assert "192.0.2.28" not in repr(stub.eval_args)
+
+
+class _SequenceRedisStub:
+    def __init__(self, *results):
+        self.results = list(results)
+        self.calls = []
+
+    def eval(self, *args):
+        self.calls.append(args)
+        return self.results.pop(0)
+
+
+def test_analysis_budget_reserves_settles_actual_duration_and_rejects_exhaustion():
+    stub = _SequenceRedisStub([1, 0, 0], 1, [0, 60, 2])
+    budget = RedisAnalysisWorkBudget(
+        client=stub,
+        namespace="rapport-auditor:test",
+        budget_seconds=30,
+        window_seconds=60,
+        reservation_seconds=11,
+        max_admissions=60,
+    )
+
+    lease = budget.reserve()
+    budget.settle(lease, 1_234)
+    with pytest.raises(AnalysisBudgetExceeded) as blocked:
+        budget.reserve()
+
+    assert blocked.value.retry_after == 60
+    reserve_call, settle_call, _blocked_call = stub.calls
+    assert reserve_call[1] == 3
+    assert reserve_call[2:5] == (
+        "rapport-auditor:test:analysis:starts",
+        "rapport-auditor:test:analysis:completed",
+        "rapport-auditor:test:analysis:active",
+    )
+    assert settle_call[1] == 2
+    assert settle_call[5] == 1_234
+    assert "192.0.2." not in repr(stub.calls)
+
+
+def test_analysis_budget_fails_closed_when_lease_was_lost():
+    budget = RedisAnalysisWorkBudget(
+        client=_SequenceRedisStub([0]),
+        namespace="rapport-auditor:test",
+        budget_seconds=30,
+        window_seconds=60,
+        reservation_seconds=11,
+        max_admissions=60,
+    )
+
+    with pytest.raises(RateLimitUnavailable, match="lease could not be settled"):
+        budget.settle("a" * 32, 100)
 
 
 def test_redis_limiter_rejects_active_client_capacity_without_bypassing():

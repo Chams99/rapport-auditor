@@ -41,6 +41,13 @@ Server mode must fail startup when required public-security configuration is abs
 | `RAPPORT_AUDITOR_RATE_LIMIT_MAX_REQUESTS` | Default `30`. |
 | `RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS` | Default `60`. |
 | `RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS` | Default `4096`; capacity overflow fails closed. |
+| `RAPPORT_AUDITOR_REVIEW_ATTEMPT_MAX_REQUESTS` | Default `60` protected review POST attempts per IP per review window, including invalid attempts; checked before application body parsing. |
+| `RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_MAX_REQUESTS` | Default `100` validated review requests per IP per hourly window; enforced atomically with the minute quota. |
+| `RAPPORT_AUDITOR_RATE_LIMIT_HOURLY_WINDOW_SECONDS` | Default `3600`. |
+| `RAPPORT_AUDITOR_ANALYSIS_BUDGET_SECONDS` | Default `30` seconds of shared analysis wall time per budget window, with admission reservations. |
+| `RAPPORT_AUDITOR_ANALYSIS_BUDGET_WINDOW_SECONDS` | Default `60`. |
+| `RAPPORT_AUDITOR_ANALYSIS_BUDGET_RESERVATION_SECONDS` | Default `11`; must cover the configured worker wall timeout plus one second for cleanup, and fit within the total budget. |
+| `RAPPORT_AUDITOR_ANALYSIS_BUDGET_MAX_ADMISSIONS` | Default `60` shared analysis admissions per budget window; bounds accounting records even for very fast work. |
 | `RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS` | Default `2`; hard upper bound on concurrent analysis subprocesses. |
 | `RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS` | Default `10` seconds wall time. |
 | `RAPPORT_AUDITOR_WORKER_MEMORY_MB` | Default `512` MB per worker on supported Linux hosts. |
@@ -49,6 +56,10 @@ Server mode must fail startup when required public-security configuration is abs
 Public limits must agree at every layer: Caddy request body, Waitress `max_request_body_size`, Flask `MAX_CONTENT_LENGTH` (1,100,000 bytes); app text (250,000 characters, 1,000,000 UTF-8 bytes, 10,000 lines); and file (1,000,000 bytes). The request must also fit multipart form overhead. Keep Waitress input spill above the whole body limit and output spill above the app’s 8,000,000-byte response cap; use a bounded temporary filesystem as a final containment layer, not as an alternate draft store.
 
 The analysis process boundary should enforce the worker count, 10-second deadline, 8-CPU-second limit, and 512-MB Linux memory limit; kill and reap timed-out children. Saturation and infrastructure failures return a generic `503`; a worker deadline returns a generic `504`. No request body, filename, IP address, secret, query value, or traceback belongs in application logs. Correlation IDs may identify endpoint, status, and duration without linking back to submitted content.
+
+In server mode, the Redis-backed early-attempt quota runs before MIME, CSRF, form/file, and JSON parsing for the four review POST routes. Proxy/WSGI buffering can still occur before Flask receives a request. The minute/hour quotas count validated requests before analysis admission; a busy worker or exhausted global budget does not refund those IP quotas. The shared work budget reserves the full worker deadline plus cleanup margin, refunds unused analysis time on successful completion, and retains the full reservation for a worker failure. Capacity rejection charges zero work but still counts an admission. Completed costs enter the rolling window at completion; unsettled leases remain conservatively charged until expiry. Redis errors reject work rather than disabling these controls.
+
+These limits identify a deployment-trusted client IP, not a person or physical machine. Users sharing a network share its quota, and changing IP can obtain another IP bucket. The global budget, bounded worker count, and app container limits contain analysis across IPs; they do not cap all request parsing, proxy traffic, or other applications on the VPS. Ordinary quota exhaustion must leave healthy dependencies ready. The shared-VPS app-only update and conservative one-worker/1 CPU/1 GiB profile are documented in [COHOSTING.md](COHOSTING.md); do not start this standalone profile on that VPS.
 
 ## Host preparation and startup
 
@@ -92,7 +103,7 @@ Run these against the exact candidate image, Caddy config, and Redis version on 
 
 - Start server mode with each required variable missing or invalid, one at a time; startup must fail with a concise configuration name and must not echo secret contents.
 - From an outside client, confirm HTTPS certificate/hostname and HTTP→HTTPS behavior. A valid form receives a `Secure`, `HttpOnly`, `SameSite=Strict` CSRF cookie; cross-origin/opaque-origin posts, forged hosts, forged forwarding headers, and absent/invalid CSRF are rejected.
-- Verify `/api/v1/health/live` stays generic and quick. Verify `/api/v1/health/ready` returns generic `503` if Redis or worker capacity is unavailable, then returns `200` after recovery. No dependency details should be exposed.
+- Verify `/api/v1/health/live` stays generic and quick. Verify `/api/v1/health/ready` returns generic `503` if Redis connectivity or worker startup checks fail, then returns `200` after recovery. Occupied healthy worker slots and ordinary quota/budget exhaustion keep readiness healthy while new analysis is rejected. No dependency details should be exposed.
 - Exercise supported UTF-8 `.txt` and `.tex`, BOM, malformed encoding, binary signatures, NUL, wrong extension/MIME, empty input, and exact size/line boundaries through the real Caddy→Waitress→Flask chain. Oversized submissions return `413`; they are rejected rather than truncated.
 - Send simultaneous allowed and over-limit requests from one true client IP through Caddy; the shared Redis limiter must enforce the same window across multiple app instances and return `429` with `Retry-After`. Forged `X-Forwarded-For` from outside must not create a new identity. Redis outage and client-capacity exhaustion must fail closed with generic `503`.
 - Saturate both worker slots, force a deterministic slow worker through a test-only harness (never a public route), and force one child failure. Confirm bounded worker count, timely `503`/`504`, child kill/reaping, recovery, and continued service health.
