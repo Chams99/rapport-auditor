@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import html
 import logging
 import secrets
 import time
@@ -23,7 +24,12 @@ from .config import (
     normalize_https_origin,
     validate_config,
 )
-from .limiting import RateLimitUnavailable, RedisSlidingWindowRateLimiter
+from .limiting import (
+    AnalysisBudgetExceeded,
+    RateLimitUnavailable,
+    RedisAnalysisWorkBudget,
+    RedisSlidingWindowRateLimiter,
+)
 from .security import (
     AuditInput,
     AuditInputError,
@@ -70,6 +76,9 @@ _ERROR_MESSAGES = {
         "origin_rejected": "The request origin could not be verified.",
         "host_rejected": "This host is not allowed to access the local app.",
         "rate_limited": "Too many reviews were started from this address. Wait a moment and retry.",
+        "attempt_rate_limited": "Too many submissions have come from this address. Wait before trying again.",
+        "analysis_busy": "The review service is busy. Wait before trying again.",
+        "method_not_allowed": "This request method is not supported here.",
         "request_too_large": "The request is over the maximum size limit.",
         "not_found": "That page could not be found.",
         "server_error": "The request could not be completed. Try again.",
@@ -99,6 +108,9 @@ _ERROR_MESSAGES = {
         "origin_rejected": "L’origine de la requête n’a pas pu être vérifiée.",
         "host_rejected": "Cet hôte n’est pas autorisé à accéder à l’application locale.",
         "rate_limited": "Trop d’analyses ont été lancées depuis cette adresse. Attendez un instant puis réessayez.",
+        "attempt_rate_limited": "Trop de tentatives proviennent de cette adresse. Attendez avant de réessayer.",
+        "analysis_busy": "Le service de révision est occupé. Attendez avant de réessayer.",
+        "method_not_allowed": "Cette méthode de requête n’est pas prise en charge ici.",
         "request_too_large": "La requête dépasse la taille maximale autorisée.",
         "not_found": "Cette page est introuvable.",
         "server_error": "La requête n’a pas abouti. Réessayez.",
@@ -114,13 +126,21 @@ _PUBLIC_OCCURRENCE_LIMIT = 10
 _PUBLIC_KEY_LIMIT = 20
 _PUBLIC_EDIT_LIMIT = 50
 _PUBLIC_DIFF_LIMIT = 150_000
+_REVIEW_POST_PATHS = frozenset({"/audit", "/revise", "/api/v1/audit", "/api/v1/revise"})
 
 
 class _ApplicationError(Exception):
-    def __init__(self, code: str, status_code: int, field: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        status_code: int,
+        field: str | None = None,
+        retry_after: int | None = None,
+    ) -> None:
         self.code = code
         self.status_code = status_code
         self.field = field
+        self.retry_after = retry_after
 
 
 def _localized_review_note(locale: str | None = None) -> str:
@@ -378,6 +398,14 @@ def _message(code: str, locale: str | None = None) -> str:
     return _ERROR_MESSAGES.get(lang, _ERROR_MESSAGES["en"]).get(code, _ERROR_MESSAGES["en"]["server_error"])
 
 
+def _bodyless_locale() -> str:
+    """Select an error language using metadata only; this is safe before body parsing."""
+    candidate = request.headers.get("X-Rapport-Locale") or request.args.get("locale")
+    if candidate is None:
+        candidate = request.accept_languages.best_match(["fr", "en"])
+    return "fr" if isinstance(candidate, str) and candidate.lower().startswith("fr") else "en"
+
+
 def _page_state() -> dict[str, str]:
     state = getattr(g, "form_state", None)
     if isinstance(state, dict):
@@ -489,6 +517,57 @@ def _error_response(app: Flask, code: str, status_code: int, field: str | None =
     return response
 
 
+def _early_rejection_response(
+    app: Flask,
+    *,
+    code: str,
+    status_code: int,
+    retry_after: int | None = None,
+) -> Response:
+    """Return a localized error without parsing or echoing a rejected request body."""
+    locale = _bodyless_locale()
+    message = _message(code, locale)
+    request_id = getattr(g, "request_id", "")
+    enhanced = request.headers.get("X-Rapport-Enhanced-Request") == "1"
+    wants_json = request.path.startswith("/api/") or enhanced or request.accept_mimetypes.best == "application/json"
+    if wants_json:
+        response = jsonify(
+            {
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "request_id": request_id,
+                }
+            }
+        )
+    else:
+        if locale == "fr":
+            title = "Réessayez plus tard" if status_code in {429, 503} else "Requête refusée"
+            link = "Retourner à l’application"
+        else:
+            title = "Try again later" if status_code in {429, 503} else "Request rejected"
+            link = "Return to the application"
+        response = make_response(
+            "<!doctype html><html lang=\""
+            + locale
+            + "\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>"
+            + html.escape(title)
+            + "</title></head><body><main><h1>"
+            + html.escape(title)
+            + "</h1><p>"
+            + html.escape(message)
+            + "</p><a href=\"/\">"
+            + html.escape(link)
+            + "</a></main></body></html>",
+            status_code,
+        )
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+    response.status_code = status_code
+    if retry_after is not None:
+        response.headers["Retry-After"] = str(max(1, int(retry_after)))
+    return response
+
+
 def _read_html_input(app: Flask) -> AuditInput:
     if request.mimetype not in {"multipart/form-data", "application/x-www-form-urlencoded"}:
         raise AuditInputError("invalid_form", 400)
@@ -586,7 +665,7 @@ def _read_api_input(app: Flask) -> AuditInput:
 def _too_many_requests(app: Flask) -> Response | None:
     address = normalize_client_address(request.remote_addr)
     try:
-        allowed, reset_after, remaining = app.extensions["rapport_auditor.rate_limiter"].check(address)
+        allowed, reset_after, remaining = app.extensions["rapport_auditor.review_quota"].check(address)
     except RateLimitUnavailable as exc:
         raise _ApplicationError("service_unavailable", 503) from exc
     g.rate_limit = (app.config["RATE_LIMIT_MAX_REQUESTS"], remaining, reset_after)
@@ -597,16 +676,63 @@ def _too_many_requests(app: Flask) -> Response | None:
     return response
 
 
-def _analyze(app: Flask, document: AuditInput) -> tuple[Any, Any, str, bool]:
+def _run_with_budget(app: Flask, operation: str, document: AuditInput) -> Any:
     runner = app.extensions["rapport_auditor.analysis_runner"]
+    budget = app.extensions.get("rapport_auditor.analysis_budget")
+    lease: str | None = None
+    if budget is not None:
+        try:
+            lease = budget.reserve()
+        except AnalysisBudgetExceeded as exc:
+            raise _ApplicationError("analysis_busy", 503, retry_after=exc.retry_after) from exc
+        except RateLimitUnavailable as exc:
+            raise _ApplicationError("service_unavailable", 503) from exc
+
+    def settle_once(elapsed_ms: int) -> None:
+        nonlocal lease
+        if lease is None:
+            return
+        settled_lease, lease = lease, None
+        if budget is None:  # A lease cannot exist without its budget.
+            raise _ApplicationError("service_unavailable", 503)
+        budget.settle(settled_lease, elapsed_ms)
+
+    started = time.monotonic()
     try:
-        result = runner.run(
-            "audit",
+        return runner.run(
+            operation,
             document.text,
             document.source_name,
             document.source_format,
             document.content_language,
         )
+    except WorkerCapacityError:
+        if lease is not None:
+            try:
+                settle_once(0)
+            except RateLimitUnavailable as exc:
+                raise _ApplicationError("service_unavailable", 503) from exc
+        raise
+    except (WorkerFailure, WorkerTimeoutError):
+        if lease is not None:
+            reservation_ms = app.config["ANALYSIS_BUDGET_RESERVATION_SECONDS"] * 1000
+            try:
+                settle_once(reservation_ms)
+            except RateLimitUnavailable as exc:
+                raise _ApplicationError("service_unavailable", 503) from exc
+        raise
+    finally:
+        if lease is not None:
+            elapsed_ms = max(0, int((time.monotonic() - started) * 1000 + 0.999))
+            try:
+                settle_once(elapsed_ms)
+            except RateLimitUnavailable as exc:
+                raise _ApplicationError("service_unavailable", 503) from exc
+
+
+def _analyze(app: Flask, document: AuditInput) -> tuple[Any, Any, str, bool]:
+    try:
+        result = _run_with_budget(app, "audit", document)
         if len(result) == 4:
             return result
         report, repetition, cleaned_text = result
@@ -621,15 +747,8 @@ def _analyze(app: Flask, document: AuditInput) -> tuple[Any, Any, str, bool]:
 
 
 def _revise(app: Flask, document: AuditInput) -> tuple[str, Any, str, bool, int]:
-    runner = app.extensions["rapport_auditor.analysis_runner"]
     try:
-        result = runner.run(
-            "revise",
-            document.text,
-            document.source_name,
-            document.source_format,
-            document.content_language,
-        )
+        result = _run_with_budget(app, "revise", document)
         if len(result) == 5:
             return result
         revised, edits, diff = result
@@ -736,6 +855,9 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             max_clients=app.config["RATE_LIMIT_MAX_CLIENTS"],
             timeout_seconds=app.config["REDIS_TIMEOUT_SECONDS"],
             namespace=app.config["RATE_LIMIT_NAMESPACE"],
+            hourly_limit=app.config["RATE_LIMIT_HOURLY_MAX_REQUESTS"],
+            hourly_window_seconds=app.config["RATE_LIMIT_HOURLY_WINDOW_SECONDS"],
+            attempt_limit=app.config["REVIEW_ATTEMPT_MAX_REQUESTS"],
         )
     else:
         from .security import InMemoryRateLimiter
@@ -745,7 +867,45 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             window_seconds=app.config["RATE_LIMIT_WINDOW_SECONDS"],
             max_clients=app.config["RATE_LIMIT_MAX_CLIENTS"],
         )
+    review_quota = rate_limiter
+    early_attempt_limiter = None
+    analysis_budget = None
+    if app.config["APP_MODE"] == "server":
+        injected_guards = (
+            app.config.get("REVIEW_QUOTA"),
+            app.config.get("EARLY_ATTEMPT_LIMITER"),
+            app.config.get("ANALYSIS_BUDGET"),
+        )
+        if configured_limiter is None:
+            review_quota = rate_limiter
+            early_attempt_limiter = rate_limiter
+            analysis_budget = RedisAnalysisWorkBudget(
+                client=rate_limiter.client,
+                namespace=app.config["RATE_LIMIT_NAMESPACE"],
+                budget_seconds=app.config["ANALYSIS_BUDGET_SECONDS"],
+                window_seconds=app.config["ANALYSIS_BUDGET_WINDOW_SECONDS"],
+                reservation_seconds=app.config["ANALYSIS_BUDGET_RESERVATION_SECONDS"],
+                max_admissions=app.config["ANALYSIS_BUDGET_MAX_ADMISSIONS"],
+            )
+        else:
+            if any(guard is None for guard in injected_guards):
+                raise ConfigurationError(
+                    "A server RATE_LIMITER test override must explicitly inject REVIEW_QUOTA, "
+                    "EARLY_ATTEMPT_LIMITER, and ANALYSIS_BUDGET"
+                )
+            review_quota, early_attempt_limiter, analysis_budget = injected_guards
+        if not callable(getattr(review_quota, "check", None)):
+            raise ConfigurationError("REVIEW_QUOTA must provide check(address)")
+        if not callable(getattr(early_attempt_limiter, "check_early_attempt", None)):
+            raise ConfigurationError("EARLY_ATTEMPT_LIMITER must provide check_early_attempt(address)")
+        if not callable(getattr(analysis_budget, "reserve", None)) or not callable(
+            getattr(analysis_budget, "settle", None)
+        ):
+            raise ConfigurationError("ANALYSIS_BUDGET must provide reserve() and settle(lease, elapsed_ms)")
     app.extensions["rapport_auditor.rate_limiter"] = rate_limiter
+    app.extensions["rapport_auditor.review_quota"] = review_quota
+    app.extensions["rapport_auditor.early_attempt_limiter"] = early_attempt_limiter
+    app.extensions["rapport_auditor.analysis_budget"] = analysis_budget
     configured_runner = app.config.get("ANALYSIS_RUNNER")
     if configured_runner is not None:
         analysis_runner = configured_runner
@@ -767,6 +927,41 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         g.request_started = time.monotonic()
         if not is_trusted_host(request.host, app.config["TRUSTED_HOSTS"]):
             return Response("Bad Request", status=400, content_type="text/plain; charset=utf-8")
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and isinstance(
+            request.routing_exception, HTTPException
+        ):
+            status = request.routing_exception.code or 400
+            code = "not_found" if status == 404 else "method_not_allowed" if status == 405 else "server_error"
+            return _early_rejection_response(app, code=code, status_code=status)
+        if (
+            app.config["APP_MODE"] == "server"
+            and request.method == "POST"
+            and request.path in _REVIEW_POST_PATHS
+        ):
+            address = normalize_client_address(request.remote_addr)
+            try:
+                allowed, retry_after, remaining = app.extensions[
+                    "rapport_auditor.early_attempt_limiter"
+                ].check_early_attempt(address)
+            except RateLimitUnavailable:
+                return _early_rejection_response(app, code="service_unavailable", status_code=503)
+            except Exception as exc:
+                logging.getLogger("rapport_api").warning(
+                    json.dumps(
+                        {"event": "early_limiter_failure", "reason": type(exc).__name__},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
+                return _early_rejection_response(app, code="service_unavailable", status_code=503)
+            g.rate_limit = (app.config["REVIEW_ATTEMPT_MAX_REQUESTS"], remaining, retry_after)
+            if not allowed:
+                return _early_rejection_response(
+                    app,
+                    code="attempt_rate_limited",
+                    status_code=429,
+                    retry_after=retry_after,
+                )
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return None
 
@@ -878,7 +1073,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
     @app.errorhandler(_ApplicationError)
     def handle_application_error(error: _ApplicationError) -> Response:
-        return _error_response(app, error.code, error.status_code, error.field)
+        response = _error_response(app, error.code, error.status_code, error.field)
+        if error.retry_after is not None:
+            response.headers["Retry-After"] = str(max(1, int(error.retry_after)))
+        return response
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_error: RequestEntityTooLarge) -> Response:

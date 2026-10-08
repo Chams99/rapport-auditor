@@ -235,14 +235,22 @@ function makeResponseDocument({ locale = "en", mode = "audit", text = "server re
   };
 }
 
-function fakeHtmlResponse({ status = 200, ok = status < 400, url = "https://rapport.test/audit", redirect = false } = {}) {
+function fakeHtmlResponse({ status = 200, ok = status < 400, url = "https://rapport.test/audit", redirect = false, contentType = "text/html; charset=utf-8", retryAfter = null, onText = null } = {}) {
   return {
     status,
     ok,
     url,
     redirected: redirect,
-    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : "100") },
-    text: async () => "<synthetic server response>",
+    headers: {
+      get: (name) => {
+        const normalized = name.toLowerCase();
+        if (normalized === "content-type") return contentType;
+        if (normalized === "content-length") return "100";
+        if (normalized === "retry-after") return retryAfter;
+        return null;
+      },
+    },
+    text: async () => { onText?.(); return "<synthetic server response>"; },
   };
 }
 
@@ -643,6 +651,7 @@ function testOriginalSourceNamesDriveDownloadNames() {
 async function testEnhancedSuccessKeepsGetUrlAndReinitializesOnePage() {
   const ui = boot({
     enhanced: true,
+    locale: "fr",
     initialText: "Draft",
     fetchHandler: async () => fakeHtmlResponse(),
   });
@@ -657,6 +666,8 @@ async function testEnhancedSuccessKeepsGetUrlAndReinitializesOnePage() {
   assert.equal(ui.fetchCalls[0].options.mode, "same-origin");
   assert.equal(ui.fetchCalls[0].options.redirect, "error");
   assert.equal(ui.fetchCalls[0].options.cache, "no-store");
+  assert.equal(ui.fetchCalls[0].options.headers["X-Rapport-Locale"], "fr", "the selected interface locale is available to early localized errors");
+  assert.equal(ui.fetchCalls[0].options.headers["X-Rapport-Enhanced-Request"], "1", "early HTML-form errors use the JSON path only for enhanced fetch submissions");
   assert.equal(ui.text.disabled, true, "form controls are locked only while the request is in flight");
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -723,6 +734,50 @@ async function testEnhancedServerErrorKeepsTextAndSelectedFileDirty() {
   assert.equal(ui.elements.get("report-file").files[0].name, "chapter.tex", "a server error keeps the selected file when FileList transfer is available");
   assert.equal(ui.document.querySelector(".form-alert") !== null, true);
   assert.equal(ui.window.dispatch("beforeunload").prevented, true, "server error submissions remain dirty rather than becoming a clean baseline");
+}
+
+async function testEnhancedRateLimitAndUnavailableResponsesPreservePage() {
+  for (const scenario of [
+    { status: 429, locale: "fr", contentType: "application/json", retryAfter: "9000", message: /Trop de demandes.*3600 s/, expectedSeconds: "3600" },
+    { status: 503, locale: "en", contentType: "text/plain; charset=utf-8", retryAfter: "0", message: /temporarily unavailable.*1 seconds/, expectedSeconds: "1" },
+    { status: 503, locale: "fr", contentType: "application/json", retryAfter: null, message: /temporairement indisponible.*Réessayez bientôt/, expectedSeconds: null },
+  ]) {
+    let bodyRead = false;
+    const ui = boot({
+      enhanced: true,
+      results: true,
+      locale: scenario.locale,
+      initialText: "Analyzed draft kept for retry.",
+      fetchHandler: async () => fakeHtmlResponse({
+        status: scenario.status,
+        ok: false,
+        contentType: scenario.contentType,
+        retryAfter: scenario.retryAfter,
+        onText: () => { bodyRead = true; },
+      }),
+    });
+    ui.file.files = [{ name: "kept-source.tex", size: 64 }];
+    ui.file.dispatch("change");
+    const originalBody = ui.document.body;
+    const originalResultVisibility = ui.resultsScroll.children.map((child) => child.hidden);
+    ui.form.dispatch("submit", { submitter: ui.auditButton });
+    await new Promise((resolve) => setImmediate(resolve));
+    ui.window.runTimers(30);
+
+    assert.equal(ui.fetchCalls.length, 1, `${scenario.status} must not trigger an automatic retry`);
+    assert.equal(bodyRead, false, `${scenario.status} must be handled before reading or parsing the response body`);
+    assert.equal(ui.document.body, originalBody, `${scenario.status} keeps the current form/results body`);
+    assert.equal(ui.text.value, "Analyzed draft kept for retry.");
+    assert.equal(ui.file.files[0].name, "kept-source.tex");
+    assert.deepEqual(ui.resultsScroll.children.map((child) => child.hidden), originalResultVisibility, "existing result visibility is retained");
+    assert.match(ui.status.textContent, scenario.message);
+    if (scenario.expectedSeconds) assert.match(ui.status.textContent, new RegExp(scenario.expectedSeconds));
+    else assert.doesNotMatch(ui.status.textContent, /\d+ s/);
+    assert.equal(ui.text.disabled, false);
+    assert.equal(ui.file.disabled, false);
+    assert.equal(ui.auditButton.disabled, false);
+    assert.equal(ui.window.dispatch("beforeunload").prevented, true, "the retained draft remains protected after an early service rejection");
+  }
 }
 
 async function testEnhancedUnexpected500DoesNotReplaceOrRetry() {
@@ -857,6 +912,7 @@ async function run() {
   await testEnhancedSuccessKeepsGetUrlAndReinitializesOnePage();
   await testEnhancedNetworkFailureKeepsDraftAndNeverRetries();
   await testEnhancedServerErrorKeepsTextAndSelectedFileDirty();
+  await testEnhancedRateLimitAndUnavailableResponsesPreservePage();
   await testEnhancedUnexpected500DoesNotReplaceOrRetry();
   await testEnhancedRejectsCrossOriginResponse();
   await testEnhancedRejectsActiveResponseMarkup();
