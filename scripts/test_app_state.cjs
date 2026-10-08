@@ -4,20 +4,31 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 class FakeElement {
-  constructor(id = "") {
+  constructor(id = "", tagName = "div") {
     this.id = id;
+    this.tagName = tagName;
     this.dataset = {};
     this.attributes = new Map();
     this.listeners = new Map();
-    this.children = new Map();
-    this.hidden = true;
+    this.selectors = new Map();
+    this.hidden = false;
     this.disabled = false;
     this.textContent = "";
     this.value = "";
     this.files = [];
+    this.children = [];
+    this.parentElement = null;
+    this.clicked = false;
     this.focused = false;
     this.classes = new Set();
+    Object.defineProperty(this, "className", {
+      get: () => [...this.classes].join(" "),
+      set: (value) => { this.classes = new Set(String(value).split(/\s+/).filter(Boolean)); },
+    });
     this.classList = {
+      add: (...names) => names.forEach((name) => this.classes.add(name)),
+      remove: (...names) => names.forEach((name) => this.classes.delete(name)),
+      contains: (name) => this.classes.has(name),
       toggle: (name, force) => {
         const enabled = force === undefined ? !this.classes.has(name) : force;
         if (enabled) this.classes.add(name);
@@ -36,6 +47,7 @@ class FakeElement {
   dispatch(type, detail = {}) {
     let prevented = false;
     const event = {
+      type,
       target: this,
       preventDefault() { prevented = true; },
       ...detail,
@@ -44,35 +56,92 @@ class FakeElement {
     return { event, prevented };
   }
 
-  querySelector(selector) {
-    return this.children.get(selector) || null;
+  dispatchEvent(event) {
+    this.dispatch(event.type, { target: this });
+    return true;
   }
+
+  querySelector(selector) { return this.selectors.get(selector) || null; }
 
   querySelectorAll(selector) {
     if (selector === 'button[type="submit"]') return this.submitButtons || [];
-    if (selector === "[data-review-filter]") return this.filterButtons || [];
-    return [];
+    return this.selectorLists?.get(selector) || [];
   }
 
-  setAttribute(name, value) { this.attributes.set(name, String(value)); }
-  getAttribute(name) { return this.attributes.get(name) ?? null; }
-  removeAttribute(name) { this.attributes.delete(name); }
+  append(...items) {
+    for (const item of items) {
+      if (typeof item === "string") continue;
+      item.parentElement = this;
+      this.children.push(item);
+    }
+  }
+
+  prepend(item) {
+    item.parentElement = this;
+    this.children.unshift(item);
+  }
+
+  after() {}
+  replaceWith() {}
+  closest() { return null; }
   focus() { this.focused = true; }
+  scrollIntoView() {}
+  setSelectionRange() {}
+  click() { this.clicked = true; this.dispatch("click"); }
+
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter((item) => item !== this);
+    this.parentElement = null;
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+    if (name === "hidden") this.hidden = true;
+  }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+    if (name === "hidden") this.hidden = false;
+  }
 }
 
 class FakeButton extends FakeElement {}
 
+class FakeEvent {
+  constructor(type) { this.type = type; }
+}
+
+class FakeFileList {
+  constructor(items) {
+    this.items = items;
+    Object.defineProperty(this, "0", { get: () => this.items[0] });
+  }
+  get length() { return this.items.length; }
+  item(index) { return this.items[index] || null; }
+  [Symbol.iterator]() { return this.items[Symbol.iterator](); }
+}
+
+class FakeDataTransfer {
+  constructor() {
+    this._items = [];
+    this.files = new FakeFileList(this._items);
+    this.items = { add: (file) => this._items.push(file) };
+  }
+}
+
 function makeButton(label, loadingEn, loadingFr) {
-  const button = new FakeButton();
+  const button = new FakeButton("", "button");
   button.dataset.loadingLabelEn = loadingEn;
   button.dataset.loadingLabelFr = loadingFr;
-  button.children.set(".button-label", Object.assign(new FakeElement(), { textContent: label }));
-  button.children.set(".button-spinner", Object.assign(new FakeElement(), { hidden: true }));
-  button.children.set(".button-arrow", Object.assign(new FakeElement(), { hidden: false }));
+  button.children = [];
+  button.selectors.set(".button-label", Object.assign(new FakeElement(), { textContent: label }));
+  button.selectors.set(".button-spinner", Object.assign(new FakeElement(), { hidden: true }));
+  button.selectors.set(".button-arrow", Object.assign(new FakeElement(), { hidden: false }));
   return button;
 }
 
-function boot(locale = "en", categories = ["writing", "source"], mode = "audit", options = {}) {
+function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, results = false, downloads = false } = {}) {
   const elements = new Map();
   const add = (id, element = new FakeElement(id)) => { elements.set(id, element); return element; };
   const form = add("report-form");
@@ -81,260 +150,286 @@ function boot(locale = "en", categories = ["writing", "source"], mode = "audit",
   const language = add("content-language");
   language.value = locale;
   const file = add("report-file");
+  const liveFileItems = [];
+  const liveFiles = new FakeFileList(liveFileItems);
+  Object.defineProperty(file, "files", {
+    get() { return liveFiles; },
+    set(value) { liveFileItems.splice(0, liveFileItems.length, ...Array.from(value || [])); },
+  });
   Object.defineProperty(file, "value", {
     get() { return this._value || ""; },
-    set(value) { this._value = value; if (!value) this.files = []; },
+    set(value) { this._value = value; if (!value) liveFileItems.length = 0; },
   });
   const format = add("source-format");
   format.value = "tex";
   const count = add("character-count");
-  const clear = options.includeHelpers === false ? null : add("clear-text");
-  const example = options.includeHelpers === false ? null : add("load-example");
-  const sampleDisclosure = add("copy-sample");
-  sampleDisclosure.hidden = false;
+  const clear = optionalFormHelpers ? add("clear-text", new FakeButton("clear-text", "button")) : null;
+  const example = optionalFormHelpers ? add("load-example", new FakeButton("load-example", "button")) : null;
+  const copySample = add("copy-sample");
+  copySample.hidden = false;
   if (example) {
-    example.dataset.sampleEn = options.invalidExample ? " " : "Synthetic sample.";
-    example.dataset.sampleFr = options.invalidExample ? "" : "Exemple fictif.";
+    example.hidden = true;
+    example.dataset.sampleEn = "Synthetic example.";
+    example.dataset.sampleFr = "Exemple fictif.";
   }
-  const filename = add("file-name");
+  if (clear) {
+    clear.hidden = true;
+    clear.disabled = true;
+    clear.selectors.set("span", Object.assign(new FakeElement(), { textContent: "Clear" }));
+  }
+  const fileChip = fileControls ? add("file-chip") : null;
+  if (fileChip) fileChip.hidden = true;
+  const fileName = fileControls ? add("file-name") : null;
+  const removeFile = fileControls ? add("remove-file", new FakeButton("remove-file", "button")) : null;
+  if (removeFile) { removeFile.hidden = true; removeFile.disabled = true; }
   const fileError = add("file-error");
+  fileError.hidden = true;
   const textError = add("text-error");
+  textError.hidden = true;
   const status = add("submission-status");
-  const editorState = add("editor-state");
-  const editorText = add("editor-state-text");
-  const removeFile = add("remove-file");
-  const stale = add("results-stale");
-  const filters = add("review-filters");
-  const filterStatus = add("filter-status");
-  const filterEmpty = add("filter-empty");
-  const allButton = new FakeButton();
-  allButton.dataset.reviewFilter = "all";
-  const writingButton = new FakeButton();
-  writingButton.dataset.reviewFilter = "writing";
-  const sourceButton = new FakeButton();
-  sourceButton.dataset.reviewFilter = "source";
-  filters.filterButtons = [allButton, writingButton, sourceButton];
-  const cards = categories.map((category) => {
-    const card = new FakeElement();
-    card.dataset.reviewCategory = category;
-    return card;
-  });
+  const page = add("page-content");
+  page.dataset.mode = "input";
   const auditButton = makeButton("Review", "Reviewing…", "Analyse…");
   const reviseButton = makeButton("Revise", "Preparing…", "Préparation…");
   form.submitButtons = [auditButton, reviseButton];
-  const page = new FakeElement();
-  page.dataset.mode = mode;
-  const windowListeners = new Map();
-  let nextConfirm = true;
+  form.selectors.set(".button-primary", auditButton);
+
+  const downloaded = [];
+  const body = new FakeElement("body", "body");
+  body.append = (...items) => {
+    FakeElement.prototype.append.apply(body, items);
+    items.filter((item) => item.tagName === "a").forEach((anchor) => downloaded.push(anchor));
+  };
+  const documentElement = new FakeElement("html", "html");
+  documentElement.lang = locale;
+  documentElement.dataset = {};
+  const created = [];
+  const queryResults = new Map();
+  let resultsScroll = null;
+  let statusPill = null;
+  if (results) {
+    resultsScroll = new FakeElement("", "div");
+    const visibleResult = new FakeElement("visible-result");
+    const alreadyHidden = new FakeElement("hidden-result");
+    alreadyHidden.hidden = true;
+    resultsScroll.append(visibleResult, alreadyHidden);
+    statusPill = new FakeElement("", "span");
+    statusPill.lastChild = { textContent: "Ready" };
+  }
+
+  const sourceHeading = new FakeElement("", "h3");
+  sourceHeading.dataset.sourceName = "Student Draft/Final.txt";
+  sourceHeading.textContent = locale === "fr" ? "Texte collé" : "Pasted text";
+  const cleanedSource = new FakeElement("", "textarea");
+  cleanedSource.value = "Synthetic cleaned text.";
+  const downloadButton = new FakeButton("", "button");
+  downloadButton.dataset.download = "cleaned";
+  downloadButton.hidden = true;
+  const exportButton = new FakeButton("", "button");
+  exportButton.hidden = true;
+
+  const queryOne = new Map([
+    [".page-content", page],
+    [".results-scroll", resultsScroll],
+    [".results-heading-row .status-pill", statusPill],
+    ["[data-export-notes]", downloads ? exportButton : null],
+    [".source-name", downloads ? sourceHeading : null],
+    ['[data-download-source="cleaned"]', downloads ? cleanedSource : null],
+  ]);
   const document = {
-    documentElement: { lang: locale },
+    documentElement,
+    body,
     activeElement: null,
     getElementById: (id) => elements.get(id) || null,
-    querySelector: (selector) => selector === ".page-content" ? page
-      : selector === ".editor-state" ? editorState
-        : null,
-    querySelectorAll: (selector) => selector === '.evidence-card[data-review-category]' ? cards
-      : selector === "[data-download]" ? []
-        : [],
-    createElement: () => new FakeElement(),
+    querySelector: (selector) => queryOne.get(selector) || null,
+    querySelectorAll(selector) {
+      if (selector === ".js-only" || selector === "[data-mod-key]" || selector === "data[data-number]"
+        || selector === ".line-reference[data-line]" || selector === ".form-alert-list a[href^='#']"
+        || selector === ".finding-list > .finding-card" || selector === ".edit-compare" || selector === ".copy-button"
+        || selector === ".stat-value data[data-number]" || selector === "[data-open-shortcuts]"
+        || selector === ".results-scroll .content-section" || selector === ".document-stat") return [];
+      if (selector === "[data-download]") return downloads ? [downloadButton] : [];
+      if (selector === ".top-progress, .results-skeleton") {
+        return created.filter((element) => element.classList.contains("top-progress") || element.classList.contains("results-skeleton"));
+      }
+      return queryResults.get(selector) || [];
+    },
+    createElement(tagName) {
+      const element = new FakeElement("", tagName);
+      created.push(element);
+      return element;
+    },
+    addEventListener() {},
   };
+
+  let nextConfirm = true;
+  let nextTimer = 0;
+  const windowListeners = new Map();
   const window = {
+    isSecureContext: false,
     confirm: () => nextConfirm,
-    setTimeout,
+    setTimeout: () => ++nextTimer,
+    clearTimeout() {},
     addEventListener(type, callback) {
       const listeners = windowListeners.get(type) || [];
       listeners.push(callback);
       windowListeners.set(type, listeners);
     },
-    dispatch(type, event = {}) {
-      const dispatched = { preventDefault() {}, ...event };
-      for (const callback of windowListeners.get(type) || []) callback(dispatched);
-      return dispatched;
+    dispatch(type, detail = {}) {
+      let prevented = false;
+      const event = { type, preventDefault() { prevented = true; }, ...detail };
+      for (const callback of windowListeners.get(type) || []) callback(event);
+      return { event, prevented };
     },
+  };
+  const URL = {
+    createObjectURL: () => `blob:synthetic-${downloaded.length}`,
+    revokeObjectURL() {},
   };
   const source = fs.readFileSync(path.join(__dirname, "..", "apps", "web", "rapport_web", "static", "app.js"), "utf8");
   vm.runInNewContext(source, {
     document,
     window,
+    navigator: { platform: "Win32", userAgent: "synthetic-test" },
+    matchMedia: () => ({ matches: true }),
     HTMLButtonElement: FakeButton,
+    Event: FakeEvent,
+    DataTransfer: FakeDataTransfer,
     Intl,
-    URL: {},
+    URL,
     Blob: class Blob {},
     console,
   }, { filename: "app.js" });
   window.dispatch("pageshow", { persisted: false });
   return {
-    elements, form, text, language, file, format, count, clear, example, filename, fileError, textError, status,
-    editorState, editorText, removeFile, sampleDisclosure, stale, filters, filterStatus, filterEmpty, allButton, writingButton,
-    sourceButton, cards, auditButton, reviseButton, window, setConfirm(value) { nextConfirm = value; },
+    elements, form, text, language, file, format, count, clear, example, copySample, fileChip, fileName, removeFile,
+    fileError, textError, status, auditButton, reviseButton, page, body, documentElement, window, downloaded,
+    resultsScroll, sourceHeading, exportButton, downloadButton,
+    setConfirm(value) { nextConfirm = value; },
   };
 }
 
-function testStateAndDraftControls() {
+function testFileEnhancementAndUndo() {
   const ui = boot();
-  assert.equal(ui.example.hidden, false, "a complete sample should enhance the visible sample action");
-  assert.equal(ui.sampleDisclosure.hidden, true, "the manual-copy fallback should hide only after enhancement succeeds");
-  assert.equal(ui.text.focused, false, "initial pageshow must not move focus");
-  assert.equal(ui.editorState.dataset.state, "empty");
-  ui.text.value = "draft";
-  ui.text.dispatch("input");
-  assert.equal(ui.editorState.dataset.state, "ready");
-  assert.equal(ui.stale.hidden, false);
+  assert.equal(ui.documentElement.classList.contains("js-ready"), true, "custom picker should activate only after its full DOM path exists");
+  assert.equal(ui.example.hidden, false, "a complete synthetic example should be exposed");
+  assert.equal(ui.copySample.hidden, true, "manual-copy fallback hides only after sample enhancement succeeds");
+  assert.equal(ui.removeFile.hidden, true);
+  assert.equal(ui.removeFile.disabled, true);
+  assert.equal(ui.clear.hidden, false);
 
-  ui.stale.hidden = true;
-  ui.language.value = "fr";
-  ui.language.dispatch("change");
-  assert.equal(ui.stale.hidden, false, "changing document language must stale existing results");
-  ui.stale.hidden = true;
   ui.format.value = "txt";
   ui.format.dispatch("change");
-  assert.equal(ui.stale.hidden, false, "changing pasted format must stale existing results");
-
-  ui.format.value = "tex";
-  ui.format.dispatch("change");
-  ui.file.files = [{ name: "source.txt", size: 7 }];
-  ui.stale.hidden = true;
+  ui.text.value = "keep draft";
+  ui.text.dispatch("input");
+  assert.equal(ui.count.classList.contains("is-over-limit"), true);
+  ui.file.files = [{ name: "chapter.tex", size: 28 }];
   ui.file.dispatch("change");
-  assert.equal(ui.stale.hidden, false, "selecting an upload must stale existing results");
-  assert.equal(ui.format.value, "txt");
-  assert.equal(ui.format.disabled, true);
-  assert.equal(ui.editorState.dataset.state, "ready", "a valid selected file takes precedence over an over-limit pasted draft");
+  assert.equal(ui.fileChip.hidden, false);
+  assert.equal(ui.fileName.textContent, "chapter.tex");
   assert.equal(ui.removeFile.hidden, false);
-  ui.removeFile.dispatch("click");
-  assert.equal(ui.text.value, "draft", "removing an upload must preserve pasted text");
-  assert.equal(ui.format.value, "tex", "removing an upload must restore the pasted format");
-  assert.equal(ui.format.disabled, false);
+  assert.equal(ui.removeFile.disabled, false);
+  assert.equal(ui.format.value, "tex");
+  assert.equal(ui.format.disabled, true, "an upload determines its own format");
+  assert.equal(ui.count.classList.contains("is-over-limit"), false, "ignored pasted text must not appear invalid while a file takes precedence");
 
-  ui.file.files = [{ name: "source.tex", size: 7 }];
+  ui.removeFile.dispatch("click");
+  assert.equal(ui.text.value, "keep draft", "removing an upload must preserve pasted text");
+  assert.equal(ui.format.value, "txt", "removing an upload restores the pasted format");
+  assert.equal(ui.format.disabled, false);
+  assert.equal(ui.fileChip.hidden, true);
+  assert.equal(ui.removeFile.hidden, true);
+  assert.equal(ui.removeFile.disabled, true);
+  assert.equal(ui.count.classList.contains("is-over-limit"), true, "the pasted-text limit returns when the upload is removed");
+
+  ui.file.files = [{ name: "too-large.txt", size: 1000001 }];
   ui.file.dispatch("change");
-  ui.setConfirm(false);
-  ui.clear.dispatch("click");
-  assert.equal(ui.text.value, "draft", "canceling Clear must preserve text");
-  assert.equal(ui.file.files.length, 1, "canceling Clear must preserve the selected file");
-  ui.setConfirm(true);
+  assert.equal(ui.file.getAttribute("aria-invalid"), "true");
+  assert.match(ui.fileError.textContent, /1\.0 MB/);
+  const rejected = ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(rejected.prevented, true, "the browser limit fallback must match the 1,000,000-byte server limit");
+
+  ui.file.files = [{ name: "chapter.txt", size: 32 }];
+  ui.file.dispatch("change");
   ui.clear.dispatch("click");
   assert.equal(ui.text.value, "");
   assert.equal(ui.file.files.length, 0);
+  assert.equal(ui.clear.querySelector("span").textContent, "Undo");
+  assert.equal(ui.removeFile.hidden, true, "Clear must synchronize the optional file action");
+  ui.clear.dispatch("click");
+  assert.equal(ui.text.value, "keep draft");
+  assert.equal(ui.file.files[0].name, "chapter.txt", "Undo restores the original selected file when supported by the browser");
   assert.equal(ui.format.value, "txt");
-  assert.equal(ui.removeFile.hidden, true, "Clear must hide the now-empty file action");
-  assert.equal(ui.removeFile.disabled, true, "Clear must disable the now-empty file action");
-  assert.equal(ui.editorState.dataset.state, "empty");
 
-  ui.text.value = "123456";
-  ui.text.dispatch("input");
-  const firstLimitNotice = ui.status.textContent;
-  assert.match(firstLimitNotice, /limit has been exceeded/);
-  ui.text.value = "1234567";
-  ui.text.dispatch("input");
-  assert.equal(ui.status.textContent, firstLimitNotice, "typing while over the limit must not announce on every keystroke");
-  ui.text.value = "12345";
-  ui.text.dispatch("input");
-  assert.match(ui.status.textContent, /back within the limit/);
-
-  ui.text.value = "keep this draft";
-  ui.text.dispatch("input");
   ui.setConfirm(false);
   ui.example.dispatch("click");
-  assert.equal(ui.text.value, "keep this draft", "canceling sample replacement must preserve text");
+  assert.equal(ui.text.value, "keep draft", "canceling sample replacement preserves the draft");
   ui.setConfirm(true);
   ui.example.dispatch("click");
-  assert.equal(ui.text.value, "Exemple fictif.", "sample content should follow the selected document language");
-  assert.match(ui.status.textContent, /Example loaded/);
-  assert.equal(ui.removeFile.hidden, true, "loading a sample must hide the file action after clearing an upload");
+  assert.equal(ui.text.value, "Synthetic example.");
 }
 
-function testSubmissionRestoreAndFilters() {
-  const allFilterUi = boot("fr", ["writing", "source", "writing"]);
-  assert.equal(allFilterUi.filterStatus.textContent, "3 pistes affichées.");
+function testOptionalHooksSubmissionAndBfcache() {
+  const ui = boot({ locale: "fr", optionalFormHelpers: false, fileControls: false });
+  assert.equal(ui.documentElement.classList.contains("js-ready"), false, "partial picker hooks must retain the native file input");
+  assert.equal(ui.text.focused, false, "initial pageshow must not steal focus");
+  const empty = ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(empty.prevented, true, "missing helper buttons must not disable required form validation");
+  assert.equal(ui.text.getAttribute("aria-invalid"), "true");
 
-  const ui = boot("fr");
-  ui.text.value = "bonjour";
+  ui.text.value = "salut";
   ui.text.dispatch("input");
-  ui.text.value = "ok";
-  ui.text.dispatch("input");
-  const focusedBeforePageshow = ui.text.focused;
-  const first = ui.form.dispatch("submit", { submitter: ui.reviseButton });
-  assert.equal(first.prevented, false);
-  assert.equal(ui.reviseButton.children.get(".button-label").textContent, "Préparation…");
-  assert.equal(ui.reviseButton.children.get(".button-spinner").hidden, false);
-  assert.equal(ui.reviseButton.children.get(".button-arrow").hidden, true);
+  const submit = ui.form.dispatch("submit", { submitter: ui.reviseButton });
+  assert.equal(submit.prevented, false);
+  assert.equal(ui.reviseButton.querySelector(".button-label").textContent, "Préparation…");
+  assert.equal(ui.reviseButton.querySelector(".button-spinner").hidden, false);
+  assert.equal(ui.reviseButton.querySelector(".button-arrow").hidden, true);
   assert.equal(ui.auditButton.disabled, true);
-  assert.equal(ui.editorState.dataset.state, "working");
-  assert.equal(ui.form.getAttribute("aria-busy"), "true");
-  assert.equal(ui.form.dispatch("submit", { submitter: ui.auditButton }).prevented, true, "duplicate submit must be canceled");
+  assert.equal(ui.form.dispatch("submit", { submitter: ui.auditButton }).prevented, true, "duplicate submission is canceled");
 
+  ui.text.value = "restored browser draft";
+  ui.text.focused = false;
   ui.window.dispatch("pageshow", { persisted: true });
   assert.equal(ui.reviseButton.disabled, false);
-  assert.equal(ui.reviseButton.children.get(".button-label").textContent, "Revise");
-  assert.equal(ui.reviseButton.children.get(".button-spinner").hidden, true);
-  assert.equal(ui.reviseButton.children.get(".button-arrow").hidden, false);
-  assert.equal(ui.form.getAttribute("aria-busy"), null);
-  assert.equal(ui.text.focused, focusedBeforePageshow, "pageshow must not steal focus");
-  const unload = ui.window.dispatch("beforeunload");
-  assert.equal(unload.returnValue, "", "a restored draft should remain protected from accidental loss");
+  assert.equal(ui.reviseButton.querySelector(".button-label").textContent, "Revise");
+  assert.equal(ui.reviseButton.querySelector(".button-spinner").hidden, true);
+  assert.equal(ui.reviseButton.querySelector(".button-arrow").hidden, false);
+  assert.equal(ui.count.textContent, "22 / 5");
+  assert.equal(ui.text.focused, false, "BFCache restoration must not steal focus");
+  assert.equal(ui.window.dispatch("beforeunload").event.returnValue, "", "restored input remains protected from accidental loss");
 
-  assert.equal(ui.filters.hidden, false);
-  assert.equal(ui.allButton.getAttribute("aria-pressed"), "true");
-  ui.sourceButton.dispatch("click");
-  assert.equal(ui.cards[0].hidden, true);
-  assert.equal(ui.cards[1].hidden, false);
-  assert.match(ui.filterStatus.textContent, /Affichage de 1 des 2.*catégorie source/);
-  ui.writingButton.dispatch("click");
-  assert.equal(ui.cards[0].hidden, false);
-  assert.equal(ui.cards[1].hidden, true);
-  assert.equal(ui.sourceButton.getAttribute("aria-pressed"), "false");
-
-  const englishUi = boot("en", [], "input");
-  englishUi.text.value = "ok";
-  englishUi.text.dispatch("input");
-  englishUi.form.dispatch("submit", { submitter: englishUi.auditButton });
-  assert.equal(englishUi.auditButton.children.get(".button-label").textContent, "Reviewing…");
-  assert.equal(englishUi.status.textContent, "Reviewing…", "audit action should announce its localized loading label");
-
-  const emptyUi = boot("en", ["source"]);
-  emptyUi.writingButton.dispatch("click");
-  assert.equal(emptyUi.filterEmpty.hidden, false);
-  assert.equal(emptyUi.filterEmpty.textContent, "No findings in this category.");
-
-  const unavailableSampleUi = boot("en", [], "input", { invalidExample: true });
-  assert.equal(unavailableSampleUi.example.hidden, true, "an incomplete sample should not expose an empty action");
-  assert.equal(unavailableSampleUi.sampleDisclosure.hidden, false, "an incomplete sample must retain the manual-copy fallback");
-
-  const invalidUi = boot("en", [], "input");
-  const emptySubmit = invalidUi.form.dispatch("submit", { submitter: invalidUi.auditButton });
-  assert.equal(emptySubmit.prevented, true);
-  assert.equal(invalidUi.editorState.dataset.state, "invalid");
-  assert.equal(invalidUi.text.getAttribute("aria-invalid"), "true");
-
-  const restoredUi = boot("en", [], "input");
-  restoredUi.text.value = "restored draft";
+  const restoredUi = boot();
+  restoredUi.text.value = "browser-restored";
+  restoredUi.file.files = [{ name: "restored.tex", size: 11 }];
   restoredUi.text.setAttribute("aria-invalid", "true");
-  restoredUi.file.files = [{ name: "restored.tex", size: 10 }];
-  restoredUi.file.setAttribute("aria-invalid", "true");
   restoredUi.fileError.hidden = false;
   restoredUi.window.dispatch("pageshow", { persisted: true });
-  assert.equal(restoredUi.count.textContent, "14 / 5");
-  assert.equal(restoredUi.fileError.hidden, false, "pageshow must not clear server-rendered file errors");
-  assert.equal(restoredUi.text.getAttribute("aria-invalid"), "true", "pageshow must preserve an existing field error");
-  assert.equal(restoredUi.removeFile.hidden, false, "pageshow must re-sync a browser-restored file selection");
+  assert.equal(restoredUi.count.textContent, "16 / 5");
+  assert.equal(restoredUi.fileName.textContent, "restored.tex");
   assert.equal(restoredUi.format.disabled, true);
   assert.equal(restoredUi.format.value, "tex");
+  assert.equal(restoredUi.fileError.hidden, false, "pageshow must preserve server-rendered upload errors");
+  assert.equal(restoredUi.text.getAttribute("aria-invalid"), "true", "pageshow must preserve server-rendered text errors");
 
-  const minimalUi = boot("en", [], "input", { includeHelpers: false });
-  assert.equal(minimalUi.sampleDisclosure.hidden, false, "the manual-copy fallback remains available without its button hook");
-  minimalUi.text.value = "ok";
-  minimalUi.text.dispatch("input");
-  const minimalSubmit = minimalUi.form.dispatch("submit", { submitter: minimalUi.auditButton });
-  assert.equal(minimalSubmit.prevented, false, "validation and submit must work when optional Clear/Sample hooks are absent");
-  assert.equal(minimalUi.auditButton.children.get(".button-label").textContent, "Reviewing…");
-
-  const defaultFileLimitUi = boot("en", [], "input");
-  defaultFileLimitUi.file.files = [{ name: "large.txt", size: 1000001 }];
-  defaultFileLimitUi.file.dispatch("change");
-  assert.equal(defaultFileLimitUi.file.getAttribute("aria-invalid"), "true");
-  assert.match(defaultFileLimitUi.fileError.textContent, /1\.0 MB/);
+  const resultsUi = boot({ results: true });
+  resultsUi.text.value = "valid";
+  resultsUi.text.dispatch("input");
+  resultsUi.form.dispatch("submit", { submitter: resultsUi.auditButton });
+  assert.deepEqual(resultsUi.resultsScroll.children.map((child) => child.hidden), [false, true, true]);
+  resultsUi.window.dispatch("pageshow", { persisted: true });
+  assert.deepEqual(resultsUi.resultsScroll.children.map((child) => child.hidden), [false, true], "BFCache restores only the original result visibility states");
 }
 
-testStateAndDraftControls();
-testSubmissionRestoreAndFilters();
+function testOriginalSourceNamesDriveDownloadNames() {
+  const ui = boot({ downloads: true });
+  ui.downloadButton.click();
+  assert.equal(ui.downloaded.at(-1).download, "Student Draft-Final_cleaned.txt");
+  assert.equal(ui.downloaded.at(-1).clicked, true);
+  ui.exportButton.click();
+  assert.equal(ui.downloaded.at(-1).download, "Student Draft-Final_review_notes.md", "localized display names must not replace the original source filename");
+}
+
+testFileEnhancementAndUndo();
+testOptionalHooksSubmissionAndBfcache();
+testOriginalSourceNamesDriveDownloadNames();
 console.log("app state regressions passed");

@@ -1,0 +1,21 @@
+{# Finding codes, labels and thresholds mirror packages/core/rapport_auditor/review.py.
+   Keep them in step when a rule changes. #}
+{% set code_labels = {
+  'repeated_sentence_start': ('Repeated opening', 'Début répété'),
+  'repeated_phrase': ('Repeated phrase', 'Expression répétée'),
+  'long_sentence': ('Long sentence', 'Phrase longue'),
+  'dense_sentence': ('Dense sentence', 'Phrase dense'),
+  'formulaic_phrase': ('Stock phrase', 'Formule convenue'),
+  'claim_needs_source': ('Source check', 'Vérifier la source'),
+  'citation_context_prompt': ('Citation context', 'Contexte de citation'),
+} %}
+{% set code_descriptions = {
+  'repeated_sentence_start': ('At least three sentences open with the same two words.', 'Au moins trois phrases commencent par les deux mêmes mots.'),
+  'repeated_phrase': ('A three-word phrase appears three or more times in the prose.', 'Une expression de trois mots apparaît au moins trois fois.'),
+  'long_sentence': ('A sentence has 36 words or more.', 'Une phrase compte 36 mots ou plus.'),
+  'dense_sentence': ('A sentence has 28 words or more and three or more clause breaks.', 'Une phrase compte 28 mots ou plus et au moins trois ruptures entre propositions.'),
+  'formulaic_phrase': ('A familiar stock phrase from a short list, such as “it is worth noting that”.', 'Une formule courante d’une courte liste, comme « il convient de noter que ».'),
+  'claim_needs_source': ('Wording that reports a result or observation, such as “the results show”.', 'Une formulation qui rapporte un résultat, comme « les résultats montrent ».'),
+  'citation_context_prompt': ('A visible citation sits beside a reported result.', 'Une référence visible accompagne un résultat rapporté.'),
+} %}
+{% set source_codes = ['claim_needs_source', 'citation_context_prompt'] %}

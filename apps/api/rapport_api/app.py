@@ -679,7 +679,7 @@ def _static_asset_versions(static_dir: Path) -> dict[str, str]:
     """Fingerprint the small set of package-owned assets used by the page."""
     return {
         filename: hashlib.sha256((static_dir / filename).read_bytes()).hexdigest()[:12]
-        for filename in ("style.css", "app.js")
+        for filename in ("style.css", "app.js", "theme.js")
     }
 
 
@@ -839,7 +839,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
             "form-action 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
             "font-src 'self'; connect-src 'self'",
         )
-        if request.endpoint == "static":
+        if request.endpoint in {"static", "favicon"}:
             response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
         else:
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -923,6 +923,15 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         response = make_response(render_template("index.html", **context))
         _set_csrf_cookie(response, app, context["csrf_token"])
         return response
+
+    @app.get("/about")
+    def about() -> Response:
+        context = _localized_template_context(app, page_path="/about")
+        return make_response(render_template("about.html", **context))
+
+    @app.get("/favicon.ico")
+    def favicon() -> Response:
+        return static_file("favicon.ico")
 
     @app.get("/api/v1/health")
     def api_health() -> Response:

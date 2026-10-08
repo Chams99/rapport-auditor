@@ -1,0 +1,15 @@
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#15141d" media="(prefers-color-scheme: dark)">
+    <meta name="description" content="{{ 'Des pistes bilingues de relecture pour le travail académique.' if is_fr else 'Bilingual editing prompts for academic writing.' }}">
+    <link rel="alternate" hreflang="en" href="{{ page_path }}?locale=en">
+    <link rel="alternate" hreflang="fr" href="{{ page_path }}?locale=fr">
+    <link rel="alternate" hreflang="x-default" href="{{ page_path }}">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+    <script src="{{ url_for('static', filename='theme.js', v=asset_versions.get('theme.js', '')) }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_versions.get('style.css', '')) }}">
+    <script src="{{ url_for('static', filename='app.js', v=asset_versions.get('app.js', '')) }}" defer></script>
