@@ -170,6 +170,10 @@
             </div>
 
             <div class="results-scroll" tabindex="0">
+            {% if mode in ['audit', 'revise'] %}
+              <p class="section-note" data-refresh-note hidden>{{ 'Actualiser ne relance pas l’analyse. Les résultats ne sont pas enregistrés ; téléchargez ce que vous souhaitez conserver.' if is_fr else 'Refreshing does not repeat the analysis. Results are not saved; download anything you want to keep.' }}</p>
+              <noscript><p class="section-note">{{ 'Actualiser cette page peut demander de renvoyer le formulaire et relancer l’analyse. Utilisez le lien d’accueil pour commencer une nouvelle revue.' if is_fr else 'Refreshing this page may ask you to resend the form and repeat the analysis. Use the home link to start a new review.' }}</p></noscript>
+            {% endif %}
             {% if mode == 'audit' and report %}
               {% set findings = report.findings|default(public_findings|default([], true), true) %}
               {% set citation_cues = report.citation_cues|default([], true) %}

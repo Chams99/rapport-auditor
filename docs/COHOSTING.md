@@ -62,7 +62,9 @@ docker network inspect rapport-auditor-ingress --format 'name={{.Name}} driver={
 docker network inspect rapport-auditor-ingress --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'
 ~~~
 
-The 2026-10-07 inventory reported 4 CPUs, 7.6 GiB RAM, 4.0 GiB MemAvailable in an earlier snapshot, and about 1,377 MiB across 32 containers in a later `docker stats` sample. Several services had no configured cgroup memory limit. The Docker root filesystem had 8.5 GB free (89% used). These are point-in-time measurements, not peak or load-test results. The initial bounded envelope in `deployment/.env.traefik.example` is 2 GiB/2 CPU for the app and 256 MiB/0.5 CPU for its dedicated Redis, with two analysis workers. This is a starting configuration based on the observed snapshot, not a capacity guarantee. Each worker has a 512 MiB address-space cap and 8 CPU seconds with a 10-second wall deadline; address-space limits are not a resident-memory guarantee. `RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS` is tunable, defaulting to 2. Before start, recheck current free memory and disk, container usage and configured limits, and establish a host safety reserve. Count all other container limits, including both portfolio blue/green instances during a rollout (each 256 MiB and 0.25 CPU), Traefik, and host services. After start, monitor memory/CPU and disk under representative activity. One bounded two-worker sample is recorded below; it is not a peak or soak test and does not validate capacity. Ensure free Docker disk can hold the candidate image, prior image for rollback, bounded logs, and Redis AOF volume. Stop if current inventory leaves inadequate reserve.
+The 2026-10-07 inventory reported 4 CPUs, 7.6 GiB RAM, 4.0 GiB MemAvailable in an earlier snapshot, and about 1,377 MiB across 32 containers in a later `docker stats` sample. Several services had no configured cgroup memory limit. The Docker root filesystem had 8.5 GB free (89% used). These are point-in-time measurements, not peak or load-test results. The shared-VPS example now selects one analysis worker, 1 GiB RAM, and 1 CPU for the app; its total memory-plus-swap cap equals its RAM cap, allowing no additional container swap. Dedicated Redis remains capped at 256 MiB/0.5 CPU. The exact legacy two-worker/2 GiB/2 CPU profile remains accepted, also with no additional app swap after recreation. Pulling Git does not update an existing ignored environment file: use the explicit profile-switch step below.
+
+These limits bound Rapport's runtime consumption, not total VPS consumption or build-time resource use. Each worker retains a 512 MiB address-space cap and 8 CPU seconds with a 10-second wall deadline; address-space limits are not a resident-memory guarantee. The one-worker profile rejects overlapping analysis with a stable 503 rather than queueing it. Readiness remains healthy during ordinary worker occupancy after successful startup; Redis/startup failures still make it unready. The historical two-request sample below does not validate this new one-worker profile. Before deployment, recheck current free memory and disk, container usage and configured limits, and establish a host safety reserve. Count all other containers, including both portfolio blue/green instances during a rollout (each 256 MiB and 0.25 CPU), Traefik, and host services. Ensure free Docker disk can hold the candidate and rollback images, bounded logs, and Redis AOF volume. Stop if current inventory leaves inadequate reserve.
 
 The following live-route checks were completed on 2026-10-07 using synthetic requests:
 
@@ -78,7 +80,7 @@ The script stops before sending audit requests unless host MemAvailable is at le
 
 ## Prepare and start Rapport
 
-Before starting, use the reviewed Rapport checkout, not the portfolio directory. Confirm the worktree is clean and `git rev-parse HEAD` matches the release SHA. Use recent `python3 scripts/vps_preflight.py` output; rerun it if the VPS has changed since the 2026-10-07 inventory. Stop if current free memory/disk or measured container usage no longer leaves a safety reserve for the initial app 2 GiB/2 CPU and Redis 256 MiB/0.5 CPU limits. The worker baseline is two; it has not been load-validated.
+Before starting, use the reviewed Rapport checkout, not the portfolio directory. Confirm the worktree is clean and `git rev-parse HEAD` matches the release SHA. Use recent `python3 scripts/vps_preflight.py` output; rerun it if the VPS has changed since the 2026-10-07 inventory. Stop if current free memory/disk or measured container usage no longer leaves a safety reserve for the selected app profile and Redis 256 MiB/0.5 CPU limits. Neither profile is a validated capacity guarantee.
 
 The single deploy script prepares the ingress first, then builds and starts only the Rapport Compose project and runs its initial smokes. From the repository root:
 
@@ -88,7 +90,7 @@ bash scripts/deploy_cohost.sh
 
 The script runs `scripts/prepare_traefik_ingress.py` with no arguments. That helper validates the current Traefik owner stack and available subnet, writes the additive `/home/ubuntu/traefik/docker-compose.override.yml`, and creates or verifies the internal `rapport-auditor-ingress` network at `172.27.0.0/24`. Its allocator range is `172.27.0.128/25`, leaving Traefik's static `172.27.0.2` outside that range. It connects the running Traefik container without restarting it; success output must include `traefik_restarted=false`. Future explicit Traefik Compose commands must include both `-f docker-compose.yml` and `-f docker-compose.override.yml`; default file discovery loads the override automatically.
 
-The script copies `deployment/.env.traefik.example` only when the ignored env file is absent. It never overwrites an existing file or prints its values. It accepts only the reviewed domain, network, peer, two-worker baseline, and initial app limits (`2g` memory/`2.0` CPU). It clears shell-exported Compose interpolation values so Compose uses the validated env file. The dedicated Redis is capped at 256 MiB/0.5 CPU. The script creates a 32-byte random secret only if absent, checks silently that it contains at least 32 bytes, then sets the file owner to container UID/GID `10001:10001` and mode `0400`. Existing secret contents are preserved. If an existing env value does not match the verified profile, the script stops without showing it; inspect and correct it locally before rerunning.
+The script copies `deployment/.env.traefik.example` only when the ignored env file is absent. It never overwrites an existing file or prints its values. It accepts only the reviewed domain, network, peer, and exact worker/memory/CPU tuples `(1, 1g, 1.0)` or `(2, 2g, 2.0)`. It clears shell-exported Compose interpolation values so Compose uses the validated env file. The dedicated Redis is capped at 256 MiB/0.5 CPU. The script creates a 32-byte random secret only if absent, checks silently that it contains at least 32 bytes, then sets the file owner to container UID/GID `10001:10001` and mode `0400`. Existing secret contents are preserved. If an existing env value does not match the verified profile, the script stops without showing it; inspect and correct it locally before rerunning.
 
 After `docker compose config --quiet`, the script builds `app`, runs `up -d` and `ps` for project `rapport-auditor-traefik`, waits up to 40 seconds for the app health check, then runs `scripts/container_smoke.py` inside the app container and `scripts/release_http_smoke.py` from the host. The first uses the actual app/Redis but Flask's test client, bypassing Waitress and Traefik; it covers readiness and synthetic French audit, English revision, and native form submission. The HTTPS smoke uses normal certificate validation, checks health/security headers, and submits synthetic bilingual API/native-form requests. The separate public acceptance run on 2026-10-07 added invalid-origin/CSRF rejection, oversized-body rejection, and forged-header quota checks; the remaining operational checks are listed above.
 
@@ -97,6 +99,28 @@ The profile publishes no host ports and starts no Caddy. Do not use the standalo
 For the isolated Linux/Python/Redis regression gate, run `bash scripts/verify_cohost.sh` from the repository root. It runs the full pytest suite with a disposable Redis on a temporary internal network, using the checked-out source read-only; it removes only its own test containers and network. Docker build cache and the uniquely tagged test-builder image are retained. This gate does not validate the public Traefik route or production capacity.
 
 For ongoing sign-off, complete the outstanding proxy-chain, log/retention, timeout/concurrency, resource-envelope, and privacy-notice checks above. The public synthetic checks already recorded should not be repeated as a substitute for those remaining checks. Do not stop a shared Redis service to simulate failure. Do not upload personal reports for acceptance testing.
+
+## Updating only the running Rapport app
+
+For an already prepared ingress and running dedicated Redis, the following selects the shared-VPS profile and recreates only Rapport's app. The profile helper validates the private existing file, creates an owner-only backup, preserves domain/proxy/secret settings, and changes only worker count, RAM, and CPU. It does not start services. Repeating it when the low profile is already selected makes no changes. Never print or commit the ignored env file or its backups.
+
+~~~sh
+cd "$HOME/projects/rapport-auditor" &&
+git pull --ff-only origin main &&
+bash scripts/verify_cohost.sh &&
+python3 scripts/set_cohost_low_profile.py &&
+env -u RAPPORT_AUDITOR_PUBLIC_DOMAIN -u RAPPORT_AUDITOR_INGRESS_NETWORK \
+  -u RAPPORT_AUDITOR_TRUSTED_PROXY -u RAPPORT_AUDITOR_SECRET_FILE \
+  -u RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS -u RAPPORT_AUDITOR_APP_MEMORY_LIMIT \
+  -u RAPPORT_AUDITOR_APP_CPU_LIMIT \
+  docker compose --project-name rapport-auditor-traefik \
+    --env-file deployment/.env.traefik -f deployment/compose.traefik.yaml \
+    up -d --build --no-deps app
+~~~
+
+The gate briefly runs a separate test container capped at 2 GiB/2 CPU and a disposable test Redis; Docker image builds are not bounded by the app's runtime cap. Run the update when host headroom permits. It neither reconciles the live Redis nor changes shared Traefik or portfolio containers. The app restart briefly interrupts Rapport. Verify the new app's health and `docker inspect` resource fields before calling the update successful: `Memory=1073741824`, `MemorySwap=1073741824`, `NanoCpus=1000000000`, and `PidsLimit=32`. In Docker, an equal memory/swap value means no additional swap ([resource constraints](https://docs.docker.com/engine/containers/resource_constraints/)). A busy healthy worker stays ready, but new analysis receives 503 until its slot is free.
+
+The historical `cohost_acceptance.py` sample deliberately submits two concurrent maximum-sized audits and expects both to succeed. That expectation targets the two-worker profile; do not use that script unchanged as a sign-off for the one-worker profile. Verify ordinary sequential audit/revision and busy-503 behavior instead.
 
 ## Rapport-only rollback
 

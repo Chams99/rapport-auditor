@@ -44,7 +44,7 @@ The home route links versioned same-origin CSS, application JavaScript, and them
 | State | Expected content and behavior |
 | --- | --- |
 | Empty | Show a compact next step, supported language/input guidance, and no sample text prefilled. |
-| Submitting | Native POST remains the core path. If JavaScript adds a busy label/status, keep it localized and prevent duplicate submission without trapping keyboard users. |
+| Submitting | Keep native POST as the no-JavaScript fallback. Enhance with a same-origin fetch from the GET page so refresh cannot repeat a completed analysis. Show localized busy status, prevent duplicate submissions, and preserve draft/file/results on uncertain failures without automatic retries. |
 | Validation error | Show a top error summary with links to each affected control and matching field-level messages. Keep entered text and provide a path to remove a selected file. |
 | Unsupported file or encoding | Name supported UTF-8 `.txt` and `.tex` input and give a specific correction. Preserve pasted text when upload validation fails. |
 | Too large | Report the configured character or byte limit and suggest splitting the document. Reject excess input; never silently clip it and present a partial review. |
@@ -83,6 +83,8 @@ docs/                     research, design, API, and security notes
 Keep one application factory and a small, bounded analysis-worker pool. The local profile binds to loopback; the explicit public profile sits behind the prepared HTTPS proxy and uses shared Redis rate-limit metadata. Give JSON endpoints stable error codes and validate content type, byte length, character length, and strict UTF-8 before analysis. HTML form errors should retain entered text and use human language; API errors should remain machine-readable. Keep the core free of Flask imports so its CLI/tests remain usable and so existing `rapport_auditor.*` imports can be preserved during migration.
 
 All browser modules should be same-origin and served from the application. No user text should enter logs, analytics, URLs, HTML attributes without escaping, or JavaScript via `innerHTML`. Jinja’s autoescaping should remain enabled; do not mark uploaded text or names safe. Do not return the whole input in the API analysis result unless the caller explicitly needs it. Return excerpts the interface needs, with stable line/sentence references.
+
+For enhanced form responses, accept only bounded same-origin HTML from the app's expected form/main structure. Parse it without executing scripts, reject active content, and replace the owned page content with the escaped server-rendered markup. Dispose old page listeners, timers, animation frames and observers before mounting the new controls. Keep changed drafts guarded by `beforeunload` only while unsaved; a completed audit/revision establishes a clean baseline, while a validation error does not. The Firefox native POST cache/resend warning cannot be fixed merely by replacing the history URL ([MDN redirections](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Redirections), [beforeunload](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)).
 
 ## Security model and controls
 

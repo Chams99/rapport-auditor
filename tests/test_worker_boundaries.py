@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import threading
 import time
 from multiprocessing.shared_memory import SharedMemory
 
@@ -11,6 +12,7 @@ import pytest
 import rapport_api.workers as worker_module
 from rapport_api.workers import (
     BoundedAnalysisWorkers,
+    WorkerCapacityError,
     WorkerFailure,
     WorkerTimeoutError,
 )
@@ -131,6 +133,62 @@ def test_worker_deadline_kills_and_reaps_child_then_releases_capacity(monkeypatc
     monkeypatch.setattr(worker_module, "_worker_entry", _quick_health_worker)
     assert runner.run("health") is True
     assert runner.available
+
+
+def test_worker_readiness_stays_true_during_a_real_busy_slot_then_times_out_and_reaps(monkeypatch):
+    runner = _runner(timeout=1.2)
+    children_before = {child.pid for child in multiprocessing.active_children()}
+    monkeypatch.setattr(worker_module, "_worker_entry", _quick_health_worker)
+    assert runner.ready()
+
+    monkeypatch.setattr(worker_module, "_worker_entry", _slow_test_worker)
+    outcome: list[BaseException] = []
+
+    def occupy_slot() -> None:
+        try:
+            runner.run("audit")
+        except BaseException as exc:
+            outcome.append(exc)
+
+    thread = threading.Thread(target=occupy_slot, daemon=True)
+    thread.start()
+    wait_until = time.monotonic() + 0.8
+    live_children = []
+    while time.monotonic() < wait_until:
+        live_children = [
+            child
+            for child in multiprocessing.active_children()
+            if child.pid not in children_before and child.is_alive()
+        ]
+        if not runner.available and live_children:
+            break
+        if not thread.is_alive():
+            break
+        time.sleep(0.01)
+
+    try:
+        assert not runner.available
+        assert live_children
+        assert runner.ready()
+        with pytest.raises(WorkerCapacityError):
+            runner.run("audit")
+    finally:
+        thread.join(timeout=2.0)
+
+    assert not thread.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], WorkerTimeoutError)
+    assert runner.available
+    _assert_no_new_children(children_before)
+
+
+def test_worker_startup_failure_stays_unready_during_retry_backoff():
+    runner = _runner()
+    runner._startup_checked = True
+    runner._startup_ok = False
+    runner._startup_retry_after = time.monotonic() + 5.0
+
+    assert not runner.ready()
 
 
 def test_worker_deadline_covers_partial_json_frame_and_recovers(monkeypatch):
