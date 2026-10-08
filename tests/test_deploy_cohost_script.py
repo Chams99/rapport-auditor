@@ -26,7 +26,11 @@ def _write_executable(path: Path, contents: str) -> None:
     path.chmod(0o755)
 
 
-def _fixture_repo(root: Path) -> tuple[Path, Path, Path]:
+def _fixture_repo(
+    root: Path,
+    *,
+    resource_profile: tuple[str, str, str] = ("2", "2g", "2.0"),
+) -> tuple[Path, Path, Path]:
     (root / "scripts").mkdir(parents=True)
     (root / "deployment").mkdir()
     script = root / "scripts" / "deploy_cohost.sh"
@@ -42,9 +46,9 @@ def _fixture_repo(root: Path) -> tuple[Path, Path, Path]:
                 "RAPPORT_AUDITOR_INGRESS_NETWORK=rapport-auditor-ingress",
                 "RAPPORT_AUDITOR_TRUSTED_PROXY=172.27.0.2",
                 "RAPPORT_AUDITOR_SECRET_FILE=./secrets/rapport_secret_key",
-                "RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS=2",
-                "RAPPORT_AUDITOR_APP_MEMORY_LIMIT=2g",
-                "RAPPORT_AUDITOR_APP_CPU_LIMIT=2.0",
+                f"RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS={resource_profile[0]}",
+                f"RAPPORT_AUDITOR_APP_MEMORY_LIMIT={resource_profile[1]}",
+                f"RAPPORT_AUDITOR_APP_CPU_LIMIT={resource_profile[2]}",
                 "",
             )
         ),
@@ -185,6 +189,35 @@ def test_wrapper_rejects_wrong_private_peer_without_compose_or_value_echo(tmp_pa
     assert not (repo / "deployment" / "secrets").exists()
 
 
+def test_wrapper_accepts_reviewed_low_resource_profile(tmp_path: Path):
+    if os.name == "nt":
+        pytest.skip("The end-to-end wrapper check requires the target Linux shell and file modes.")
+    repo = tmp_path / "repo"
+    script, log, bin_dir = _fixture_repo(repo, resource_profile=("1", "1g", "1.0"))
+
+    result = _run_wrapper(script, log, bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    events = log.read_text(encoding="utf-8").splitlines()
+    assert any("config --quiet" in event for event in events)
+    assert any("up -d" in event for event in events)
+    assert not (log.parent / "compose-env-leak").exists()
+
+
+def test_wrapper_rejects_unreviewed_resource_profile_without_compose(tmp_path: Path):
+    if os.name == "nt":
+        pytest.skip("The end-to-end wrapper check requires the target Linux shell and file modes.")
+    repo = tmp_path / "repo"
+    script, log, bin_dir = _fixture_repo(repo, resource_profile=("2", "1g", "1.0"))
+
+    result = _run_wrapper(script, log, bin_dir)
+
+    assert result.returncode != 0
+    assert "1g" not in result.stdout + result.stderr
+    events = log.read_text(encoding="utf-8").splitlines()
+    assert events == ["python scripts/prepare_traefik_ingress.py", "python -"]
+
+
 def test_wrapper_bash_syntax_and_safe_command_order():
     bash = _bash_executable()
     if not bash:
@@ -196,8 +229,8 @@ def test_wrapper_bash_syntax_and_safe_command_order():
     assert source.index("python3 scripts/prepare_traefik_ingress.py") < source.index('"${COMPOSE[@]}" config --quiet')
     assert source.index('"${COMPOSE[@]}" config --quiet') < source.index('"${COMPOSE[@]}" build app')
     assert source.index('"${COMPOSE[@]}" build app') < source.index('"${COMPOSE[@]}" up -d')
-    assert "RAPPORT_AUDITOR_APP_MEMORY_LIMIT\": \"2g\"" in source
-    assert "RAPPORT_AUDITOR_APP_CPU_LIMIT\": \"2.0\"" in source
+    assert "legacy_profile = (\"2\", \"2g\", \"2.0\")" in source
+    assert "shared_vps_profile = (\"1\", \"1g\", \"1.0\")" in source
     assert "exec -T app sh -c 'cat > /tmp/rapport-container-smoke.py && exec python /tmp/rapport-container-smoke.py'" in source
     assert " < scripts/container_smoke.py" in source
     assert '"${COMPOSE[@]}" cp scripts/container_smoke.py' not in source

@@ -42,11 +42,18 @@ expected = {
     "RAPPORT_AUDITOR_INGRESS_NETWORK": "rapport-auditor-ingress",
     "RAPPORT_AUDITOR_TRUSTED_PROXY": "172.27.0.2",
     "RAPPORT_AUDITOR_SECRET_FILE": "./secrets/rapport_secret_key",
-    "RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS": "2",
-    "RAPPORT_AUDITOR_APP_MEMORY_LIMIT": "2g",
-    "RAPPORT_AUDITOR_APP_CPU_LIMIT": "2.0",
 }
-if any(values.get(key) != value for key, value in expected.items()):
+legacy_profile = ("2", "2g", "2.0")
+shared_vps_profile = ("1", "1g", "1.0")
+profile = (
+    values.get("RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS"),
+    values.get("RAPPORT_AUDITOR_APP_MEMORY_LIMIT"),
+    values.get("RAPPORT_AUDITOR_APP_CPU_LIMIT"),
+)
+if any(values.get(key) != value for key, value in expected.items()) or profile not in {
+    legacy_profile,
+    shared_vps_profile,
+}:
     raise SystemExit("Private env does not match the reviewed co-hosting profile; edit it locally and rerun.")
 PY
 

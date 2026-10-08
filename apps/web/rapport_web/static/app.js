@@ -1,6 +1,72 @@
 (() => {
   "use strict";
 
+  let disposeCurrentPage = () => {};
+
+  const initializePage = ({ forceDirty = false } = {}) => {
+    disposeCurrentPage();
+    const globalCleanups = [];
+    const timers = new Set();
+    const animationFrames = new Set();
+    const observers = new Set();
+    const objectUrls = new Set();
+    let activeRequest = null;
+    let activeRequestTimeout = 0;
+
+    const listenGlobally = (target, type, callback, options) => {
+      target.addEventListener(type, callback, options);
+      globalCleanups.push(() => target.removeEventListener(type, callback, options));
+    };
+    const setPageTimeout = (callback, delay) => {
+      let id = 0;
+      id = window.setTimeout(() => {
+        timers.delete(id);
+        callback();
+      }, delay);
+      timers.add(id);
+      return id;
+    };
+    const clearPageTimeout = (id) => {
+      window.clearTimeout(id);
+      timers.delete(id);
+    };
+    const requestPageFrame = (callback) => {
+      let id = 0;
+      id = window.requestAnimationFrame((time) => {
+        animationFrames.delete(id);
+        callback(time);
+      });
+      animationFrames.add(id);
+      return id;
+    };
+    const createPageObjectUrl = (blob) => {
+      const url = URL.createObjectURL(blob);
+      objectUrls.add(url);
+      return url;
+    };
+    const revokePageObjectUrl = (url) => {
+      URL.revokeObjectURL(url);
+      objectUrls.delete(url);
+    };
+
+    disposeCurrentPage = () => {
+      activeRequest?.abort();
+      activeRequest = null;
+      if (activeRequestTimeout) clearPageTimeout(activeRequestTimeout);
+      activeRequestTimeout = 0;
+      globalCleanups.splice(0).forEach((cleanup) => cleanup());
+      timers.forEach((id) => window.clearTimeout(id));
+      timers.clear();
+      animationFrames.forEach((id) => window.cancelAnimationFrame(id));
+      animationFrames.clear();
+      observers.forEach((observer) => observer.disconnect());
+      observers.clear();
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      objectUrls.clear();
+    };
+
+    const run = () => {
+
   const page = document.querySelector(".page-content");
   const form = document.getElementById("report-form");
   const textField = document.getElementById("report-text");
@@ -50,13 +116,16 @@
     clearedShort: isFr ? "Saisie effacée" : "Draft cleared",
     fileAdded: (name) => (isFr ? `Fichier ajouté : ${name}` : `File added: ${name}`),
     exported: isFr ? "Notes exportées" : "Review notes exported",
+    submitFailed: isFr
+      ? "Le résultat n’a pas pu être chargé. Votre texte et votre fichier sont toujours ici ; vérifiez la connexion avant de réessayer."
+      : "The result could not be loaded. Your text and file are still here; check the connection before retrying.",
     reducedMotion: matchMedia("(prefers-reduced-motion: reduce)"),
   };
 
   const announce = (message) => {
     if (!statusLabel) return;
     statusLabel.textContent = "";
-    window.setTimeout(() => { statusLabel.textContent = message; }, 30);
+    setPageTimeout(() => { statusLabel.textContent = message; }, 30);
   };
 
   // Short-lived confirmations with an optional action (Undo). The region is a
@@ -71,9 +140,9 @@
     item.append(text);
     let timer = 0;
     const dismiss = () => {
-      window.clearTimeout(timer);
+      clearPageTimeout(timer);
       item.classList.add("is-leaving");
-      window.setTimeout(() => item.remove(), 200);
+      setPageTimeout(() => item.remove(), 200);
     };
     if (action && onAction) {
       const button = document.createElement("button");
@@ -84,9 +153,9 @@
       item.append(button);
     }
     toastRegion.append(item);
-    timer = window.setTimeout(dismiss, duration);
-    item.addEventListener("mouseenter", () => window.clearTimeout(timer));
-    item.addEventListener("mouseleave", () => { timer = window.setTimeout(dismiss, 1500); });
+    timer = setPageTimeout(dismiss, duration);
+    item.addEventListener("mouseenter", () => clearPageTimeout(timer));
+    item.addEventListener("mouseleave", () => { timer = setPageTimeout(dismiss, 1500); });
   };
 
   // Theme: system → light → dark, remembered on this device only.
@@ -120,6 +189,8 @@
   if (isMac) document.querySelectorAll("[data-mod-key]").forEach((key) => { key.textContent = "⌘"; });
 
   if (form && textField && countLabel) {
+    const refreshNote = document.querySelector("[data-refresh-note]");
+    if (refreshNote && document.body.dataset.enhancedResult === "true") refreshNote.hidden = false;
     const hasCompleteSample = Boolean(
       exampleButton?.dataset.sampleEn?.trim() && exampleButton?.dataset.sampleFr?.trim(),
     );
@@ -156,10 +227,27 @@
     const clearErrors = () => {
       setFieldError(textField, textError, "");
       setFieldError(fileField, fileError, "");
+      if (statusLabel?.getAttribute("role") === "alert") {
+        statusLabel.setAttribute("role", "status");
+        statusLabel.setAttribute("aria-live", "polite");
+        statusLabel.classList.add("visually-hidden");
+        statusLabel.textContent = "";
+      }
     };
 
     let pastedFormat = formatField?.value || "txt";
-    let hasUnsavedDraft = textField.value.length > 0 || Boolean(selectedFile());
+    // Successful audit/revision text is the clean baseline. A server-rendered
+    // validation response with retained input remains an unsaved draft.
+    const retainedErrorDraft = Boolean(document.querySelector(".form-alert"))
+      && Boolean(textField.value || selectedFile());
+    const dirtyBaseline = forceDirty || retainedErrorDraft;
+    const initialDraftText = dirtyBaseline ? "" : textField.value;
+    const initialDraftFile = dirtyBaseline ? null : selectedFile();
+    let hasUnsavedDraft = false;
+    const updateUnsavedDraft = () => {
+      hasUnsavedDraft = textField.value !== initialDraftText || selectedFile() !== initialDraftFile;
+      syncBeforeUnload();
+    };
 
     formatField?.addEventListener("change", () => {
       if (!selectedFile()) pastedFormat = formatField.value;
@@ -184,12 +272,11 @@
       if (file && formatField) {
         formatField.value = file.name.toLowerCase().endsWith(".tex") ? "tex" : "txt";
         formatField.disabled = true;
-        hasUnsavedDraft = true;
       } else if (!file && formatField) {
         formatField.value = pastedFormat;
         formatField.disabled = false;
-        hasUnsavedDraft = textField.value.length > 0;
       }
+      updateUnsavedDraft();
       updateCounter({ announceLimit });
     };
 
@@ -217,7 +304,7 @@
 
     textField.addEventListener("input", () => {
       setFieldError(textField, textError, "");
-      hasUnsavedDraft = textField.value.length > 0 || Boolean(selectedFile());
+      updateUnsavedDraft();
       updateCounter();
     });
 
@@ -241,12 +328,14 @@
 
       form.addEventListener("dragenter", (event) => {
         if (!hasFiles(event)) return;
+        if (isSubmitting) { event.preventDefault(); return; }
         event.preventDefault();
         dragDepth += 1;
         dropZone.classList.add("is-dragover");
       });
       form.addEventListener("dragover", (event) => {
         if (!hasFiles(event)) return;
+        if (isSubmitting) { event.preventDefault(); return; }
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
       });
@@ -258,6 +347,7 @@
       form.addEventListener("drop", (event) => {
         if (!hasFiles(event)) return;
         event.preventDefault();
+        if (isSubmitting) return;
         dragDepth = 0;
         dropZone.classList.remove("is-dragover");
         const dropped = Array.from(event.dataTransfer.files || []);
@@ -272,8 +362,8 @@
     }
 
     // A file dropped outside the form would otherwise navigate away and lose the draft.
-    window.addEventListener("dragover", (event) => event.preventDefault());
-    window.addEventListener("drop", (event) => event.preventDefault());
+    listenGlobally(window, "dragover", (event) => event.preventDefault());
+    listenGlobally(window, "drop", (event) => event.preventDefault());
 
     contentLanguageField?.addEventListener("change", () => {
       textField.lang = contentLanguageField.value === "fr" ? "fr" : "en";
@@ -284,7 +374,7 @@
     const clearText = clearLabel?.textContent || "";
     let undoTimer = 0;
     const endUndo = () => {
-      window.clearTimeout(undoTimer);
+      clearPageTimeout(undoTimer);
       undoState = null;
       if (clearLabel) clearLabel.textContent = clearText;
       updateCounter();
@@ -315,12 +405,11 @@
       if (formatField) formatField.value = "txt";
       pastedFormat = "txt";
       updateFile();
-      hasUnsavedDraft = false;
       clearErrors();
       textField.dispatchEvent(new Event("ra:content"));
       clearButton.disabled = false;
       if (clearLabel) clearLabel.textContent = messages.undo;
-      undoTimer = window.setTimeout(endUndo, 8000);
+      undoTimer = setPageTimeout(endUndo, 8000);
       toast(messages.clearedShort, { action: messages.undo, onAction: () => { if (undoState) clearButton.click(); }, duration: 8000 });
       textField.focus();
     });
@@ -339,7 +428,6 @@
       if (formatField) formatField.value = "txt";
       pastedFormat = "txt";
       updateFile();
-      hasUnsavedDraft = true;
       clearErrors();
       updateCounter();
       textField.focus();
@@ -358,15 +446,25 @@
     // While the server works: a thin progress bar and a skeleton of the results,
     // so the wait reads as "results are coming" instead of a frozen page.
     let resultsHiddenState = null;
+    let loadingSnapshot = null;
     const showLoading = (label) => {
+      restoreLoading();
       const bar = document.createElement("div");
       bar.className = "top-progress";
       bar.setAttribute("aria-hidden", "true");
       document.body.append(bar);
       const pill = document.querySelector(".results-heading-row .status-pill");
+      const exportNotes = document.querySelector("[data-export-notes]");
+      loadingSnapshot = {
+        pill,
+        pillClass: pill?.className || "",
+        pillText: pill?.lastChild?.textContent,
+        exportNotes,
+        exportHidden: exportNotes?.hidden,
+      };
       if (pill) {
         pill.className = "status-pill status-busy";
-        pill.lastChild.textContent = label;
+        if (pill.lastChild) pill.lastChild.textContent = label;
       }
       const scroll = document.querySelector(".results-scroll");
       if (!scroll) return;
@@ -381,34 +479,277 @@
       resultsHiddenState = [...scroll.children].map((child) => ({ child, hidden: child.hidden }));
       resultsHiddenState.forEach(({ child }) => { child.hidden = true; });
       scroll.prepend(skeleton);
-      document.querySelector("[data-export-notes]")?.setAttribute("hidden", "");
+      if (exportNotes) exportNotes.hidden = true;
+    };
+
+    const restoreLoading = () => {
+      document.querySelectorAll(".top-progress, .results-skeleton").forEach((node) => node.remove());
+      resultsHiddenState?.forEach(({ child, hidden }) => { child.hidden = hidden; });
+      resultsHiddenState = null;
+      if (loadingSnapshot?.pill) {
+        loadingSnapshot.pill.className = loadingSnapshot.pillClass;
+        if (loadingSnapshot.pill.lastChild && loadingSnapshot.pillText !== undefined) {
+          loadingSnapshot.pill.lastChild.textContent = loadingSnapshot.pillText;
+        }
+      }
+      if (loadingSnapshot?.exportNotes) loadingSnapshot.exportNotes.hidden = loadingSnapshot.exportHidden;
+      loadingSnapshot = null;
     };
 
     let isSubmitting = false;
-    window.addEventListener("beforeunload", (event) => {
-      if (!hasUnsavedDraft || isSubmitting) return;
+    let isEnhancedSubmitting = false;
+    const beforeUnloadHandler = (event) => {
+      if (!hasUnsavedDraft || (isSubmitting && !isEnhancedSubmitting)) return;
       event.preventDefault();
       event.returnValue = "";
-    });
+    };
+    let beforeUnloadAttached = false;
+    globalCleanups.push(() => window.removeEventListener("beforeunload", beforeUnloadHandler));
+    const syncBeforeUnload = () => {
+      const shouldWarn = hasUnsavedDraft && (!isSubmitting || isEnhancedSubmitting);
+      if (shouldWarn && !beforeUnloadAttached) {
+        window.addEventListener("beforeunload", beforeUnloadHandler);
+        beforeUnloadAttached = true;
+      } else if (!shouldWarn && beforeUnloadAttached) {
+        window.removeEventListener("beforeunload", beforeUnloadHandler);
+        beforeUnloadAttached = false;
+      }
+    };
+
+    const submitControls = [...form.querySelectorAll("textarea, input[type='file'], select, button[type='button']")];
+    let pendingControlStates = null;
+    const restoreSubmitControls = () => {
+      pendingControlStates?.forEach(({ control, disabled }) => { control.disabled = disabled; });
+      pendingControlStates = null;
+    };
+    let pendingButtonStates = null;
+    const restoreSubmitButtons = () => {
+      pendingButtonStates?.forEach(({ button, disabled, ariaBusy, labelText, idleLabel, spinnerHidden, arrowHidden }) => {
+        button.disabled = disabled;
+        if (ariaBusy === null) button.removeAttribute("aria-busy");
+        else button.setAttribute("aria-busy", ariaBusy);
+        const label = button.querySelector(".button-label");
+        if (label) {
+          label.textContent = labelText;
+          if (idleLabel === undefined) delete label.dataset.idleLabel;
+          else label.dataset.idleLabel = idleLabel;
+        }
+        const spinner = button.querySelector(".button-spinner");
+        const arrow = button.querySelector(".button-arrow");
+        if (spinner) spinner.hidden = spinnerHidden;
+        if (arrow) arrow.hidden = arrowHidden;
+      });
+      pendingButtonStates = null;
+    };
+    const showSubmitFailure = () => {
+      if (!statusLabel) return;
+      statusLabel.setAttribute("role", "alert");
+      statusLabel.setAttribute("aria-live", "assertive");
+      statusLabel.classList.remove("visually-hidden");
+      statusLabel.textContent = "";
+      setPageTimeout(() => { statusLabel.textContent = messages.submitFailed; }, 30);
+    };
+
+    const enhancedFetchAvailable = () => (
+      typeof fetch === "function"
+      && typeof FormData === "function"
+      && typeof DOMParser === "function"
+      && typeof AbortController === "function"
+      && typeof URL === "function"
+      && typeof window.location?.href === "string"
+    );
+
+    const readBoundedResponse = async (response, isCurrentRequest) => {
+      const limit = 8_000_000;
+      const declared = Number(response.headers?.get("content-length") || 0);
+      if (declared > limit) throw new Error("response-too-large");
+      if (response.body?.getReader && typeof TextDecoder === "function") {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let bytes = 0;
+        let output = "";
+        while (true) {
+          const part = await reader.read();
+          if (!isCurrentRequest()) {
+            await reader.cancel();
+            throw new Error("stale-request");
+          }
+          if (part.done) break;
+          bytes += part.value.byteLength;
+          if (bytes > limit) {
+            await reader.cancel();
+            throw new Error("response-too-large");
+          }
+          output += decoder.decode(part.value, { stream: true });
+        }
+        return output + decoder.decode();
+      }
+      const output = await response.text();
+      if (!isCurrentRequest()) throw new Error("stale-request");
+      if (new TextEncoder().encode(output).byteLength > limit) throw new Error("response-too-large");
+      return output;
+    };
+
+    const isSafeResponseBody = (parsed) => {
+      if (parsed.body.querySelectorAll("script, iframe, object, embed, audio, video, source, track, img, base, link, style, meta[http-equiv]").length) return false;
+      for (const node of parsed.body.querySelectorAll("*")) {
+        const attributes = [...node.attributes];
+        if (attributes.some((attribute) => {
+          const name = attribute.name.toLowerCase();
+          const value = attribute.value.trim();
+          if (name.startsWith("on") || name === "style" || name === "srcdoc" || /^(?:javascript|data|vbscript):/i.test(value)) return true;
+          const isSvgElement = node.namespaceURI?.toLowerCase() === "http://www.w3.org/2000/svg";
+          if (isSvgElement && ["href", "xlink:href"].includes(name)) return !value.startsWith("#");
+          const activeUrl = ["src", "srcset", "action", "formaction", "xlink:href"].includes(name)
+            || (name === "href" && node.localName?.toLowerCase() === "use");
+          if (!activeUrl || value.startsWith("#")) return false;
+          try {
+            const url = new URL(value, window.location.href);
+            return url.origin !== new URL(window.location.href).origin
+              || !["http:", "https:"].includes(url.protocol)
+              || Boolean(url.username || url.password);
+          } catch {
+            return true;
+          }
+        })) return false;
+      }
+      return true;
+    };
+
+    const isAllowedFormResponse = (returnedForm, responseUrl) => {
+      const method = (returnedForm.getAttribute("method") || returnedForm.method || "").toLowerCase();
+      if (method !== "post") return false;
+      const rawAction = returnedForm.getAttribute("action") || returnedForm.action;
+      let action;
+      try { action = new URL(rawAction, responseUrl); } catch { return false; }
+      const responseOrigin = new URL(responseUrl).origin;
+      if (action.origin !== responseOrigin || action.pathname !== "/audit" || action.username || action.password || action.search || action.hash) return false;
+
+      const submitters = [...returnedForm.querySelectorAll('button[type="submit"]')];
+      const paths = submitters.map((button) => {
+        try {
+          const destination = new URL(button.getAttribute("formaction") || button.formAction || rawAction, responseUrl);
+          if (destination.origin !== responseOrigin || destination.username || destination.password || destination.search || destination.hash) return "";
+          return destination.pathname;
+        } catch {
+          return "";
+        }
+      });
+      return paths.includes("/audit") && paths.includes("/revise")
+        && paths.every((path) => path === "/audit" || path === "/revise");
+    };
+
+    const copySelectedFile = (from, to) => {
+      const file = from?.files?.[0];
+      if (!file || !to || typeof DataTransfer !== "function") return;
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        to.files = transfer.files;
+      } catch {
+        // Browsers that do not permit FileList transfer retain the server's error page.
+      }
+    };
+
+    const adoptResponse = (parsed, { preserveDraft, forceDirty }) => {
+      const incomingText = parsed.getElementById("report-text");
+      if (preserveDraft && incomingText) incomingText.value = textField.value;
+      const newBody = document.importNode(parsed.body, true);
+      if (preserveDraft) copySelectedFile(fileField, newBody.querySelector("#report-file"));
+      document.documentElement.lang = parsed.documentElement.lang || "en";
+      if (parsed.title) document.title = parsed.title;
+      newBody.dataset.enhancedResult = forceDirty ? "false" : "true";
+      document.body.replaceWith(newBody);
+      initializePage({ forceDirty });
+    };
+
+    const submitWithFetch = async (submitButton, formData, actionUrl) => {
+      const controller = new AbortController();
+      const isCurrentRequest = () => activeRequest === controller;
+      activeRequest = controller;
+      const timeout = setPageTimeout(() => controller.abort(), 20000);
+      activeRequestTimeout = timeout;
+      const priorControlStates = submitControls.map((control) => ({ control, disabled: control.disabled }));
+      pendingControlStates = priorControlStates;
+      submitControls.forEach((control) => { control.disabled = true; });
+      try {
+        const response = await fetch(actionUrl.href, {
+          method: "POST",
+          body: formData,
+          credentials: "same-origin",
+          mode: "same-origin",
+          redirect: "error",
+          cache: "no-store",
+          headers: { Accept: "text/html" },
+          signal: controller.signal,
+        });
+        if (!isCurrentRequest()) return;
+        if (response.redirected) throw new Error("unexpected-redirect");
+        const responseUrl = new URL(response.url || actionUrl.href, window.location.href);
+        if (responseUrl.origin !== new URL(window.location.href).origin || responseUrl.username || responseUrl.password) throw new Error("cross-origin-response");
+        if (!["/audit", "/revise"].includes(responseUrl.pathname) || responseUrl.search || responseUrl.hash) throw new Error("unexpected-response-route");
+        if ((response.headers?.get("content-type") || "").toLowerCase().split(";")[0].trim() !== "text/html") {
+          throw new Error("unexpected-content-type");
+        }
+        const html = await readBoundedResponse(response, isCurrentRequest);
+        if (!isCurrentRequest()) return;
+        const parsed = new DOMParser().parseFromString(html, "text/html");
+        if (!isSafeResponseBody(parsed)) throw new Error("unsafe-app-response");
+        const returnedForm = parsed.getElementById("report-form");
+        const returnedPage = parsed.querySelector(".page-content");
+        const returnedText = parsed.getElementById("report-text");
+        const csrf = returnedForm?.querySelector('input[name="csrf_token"]');
+        const isResult = ["audit", "revise"].includes(returnedPage?.dataset.mode);
+        const isFormError = Boolean(parsed.querySelector(".form-alert") && returnedForm && returnedText && csrf);
+        if (!returnedForm || !returnedText || !csrf || !parsed.getElementById("main-content")
+          || !isAllowedFormResponse(returnedForm, responseUrl)) {
+          throw new Error("unexpected-app-response");
+        }
+        if (response.ok && isResult) {
+          activeRequest = null;
+          clearPageTimeout(timeout);
+          activeRequestTimeout = 0;
+          adoptResponse(parsed, { preserveDraft: false, forceDirty: false });
+          return;
+        }
+        if (response.status >= 400 && response.status < 500 && isFormError) {
+          activeRequest = null;
+          clearPageTimeout(timeout);
+          activeRequestTimeout = 0;
+          adoptResponse(parsed, { preserveDraft: true, forceDirty: true });
+          return;
+        }
+        throw new Error("request-not-accepted");
+      } catch {
+        if (!isCurrentRequest()) return;
+        activeRequest = null;
+        clearPageTimeout(timeout);
+        activeRequestTimeout = 0;
+        restoreLoading();
+        restoreSubmitControls();
+        restoreSubmitButtons();
+        isEnhancedSubmitting = false;
+        isSubmitting = false;
+        syncBeforeUnload();
+        showSubmitFailure();
+      }
+    };
 
     // A page restored from the back/forward cache must not keep its buttons locked.
-    window.addEventListener("pageshow", (event) => {
+    listenGlobally(window, "pageshow", (event) => {
       if (event.persisted) {
+        activeRequest?.abort();
+        activeRequest = null;
+        if (activeRequestTimeout) clearPageTimeout(activeRequestTimeout);
+        activeRequestTimeout = 0;
         isSubmitting = false;
-        document.querySelectorAll(".top-progress, .results-skeleton").forEach((node) => node.remove());
-        resultsHiddenState?.forEach(({ child, hidden }) => { child.hidden = hidden; });
-        resultsHiddenState = null;
-        form.querySelectorAll('button[type="submit"]').forEach((button) => {
-          button.disabled = false;
-          button.removeAttribute("aria-busy");
-          const label = button.querySelector(".button-label");
-          if (label?.dataset.idleLabel) label.textContent = label.dataset.idleLabel;
-          button.querySelector(".button-spinner")?.setAttribute("hidden", "");
-          button.querySelector(".button-arrow")?.removeAttribute("hidden");
-        });
+        isEnhancedSubmitting = false;
+        restoreLoading();
+        restoreSubmitControls();
+        restoreSubmitButtons();
       }
       updateFile({ preserveErrors: true, announceLimit: false });
-      hasUnsavedDraft = textField.value.length > 0 || Boolean(selectedFile());
+      syncBeforeUnload();
     });
 
     form.addEventListener("submit", (event) => {
@@ -443,9 +784,42 @@
         return;
       }
 
-      isSubmitting = true;
       const submitButton = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+      let formData = null;
+      let actionUrl = null;
+      let useFetch = enhancedFetchAvailable();
+      if (useFetch) {
+        try {
+          actionUrl = new URL(submitButton?.formAction || form.action, window.location.href);
+          formData = new FormData(form);
+          if (submitButton?.name) formData.append(submitButton.name, submitButton.value);
+        } catch {
+          // Leave the browser's native POST path available if request setup is unsupported.
+          useFetch = false;
+        }
+      }
+      if (useFetch && (actionUrl.origin !== new URL(window.location.href).origin
+        || actionUrl.username || actionUrl.password || actionUrl.search || actionUrl.hash
+        || !["/audit", "/revise"].includes(actionUrl.pathname))) {
+        event.preventDefault();
+        showSubmitFailure();
+        return;
+      }
+      if (useFetch) event.preventDefault();
+
+      isSubmitting = true;
+      isEnhancedSubmitting = useFetch;
+      syncBeforeUnload();
       const allSubmitButtons = [...form.querySelectorAll('button[type="submit"]')];
+      pendingButtonStates = allSubmitButtons.map((button) => ({
+        button,
+        disabled: button.disabled,
+        ariaBusy: button.getAttribute("aria-busy"),
+        labelText: button.querySelector(".button-label")?.textContent || "",
+        idleLabel: button.querySelector(".button-label")?.dataset.idleLabel,
+        spinnerHidden: button.querySelector(".button-spinner")?.hidden,
+        arrowHidden: button.querySelector(".button-arrow")?.hidden,
+      }));
       allSubmitButtons.forEach((button) => {
         button.disabled = true;
         if (button !== submitButton) return;
@@ -464,6 +838,7 @@
       const busyLabel = submitButton?.dataset[`loadingLabel${locale === "fr" ? "Fr" : "En"}`] || (isFr ? "Préparation…" : "Preparing…");
       announce(busyLabel);
       showLoading(busyLabel);
+      if (useFetch) void submitWithFetch(submitButton, formData, actionUrl);
     });
 
     updateFile({ preserveErrors: true, announceLimit: false });
@@ -698,8 +1073,8 @@
         } catch {
           announce(messages.copyFailed);
         }
-        window.clearTimeout(resetTimer);
-        resetTimer = window.setTimeout(() => { label.textContent = idle; }, 1800);
+        clearPageTimeout(resetTimer);
+        resetTimer = setPageTimeout(() => { label.textContent = idle; }, 1800);
       });
     });
   }
@@ -714,9 +1089,9 @@
         const progress = Math.min(1, (now - started) / 650);
         const eased = 1 - (1 - progress) ** 3;
         node.textContent = numberFormat.format(Math.round(target * eased));
-        if (progress < 1) requestAnimationFrame(step);
+        if (progress < 1) requestPageFrame(step);
       };
-      requestAnimationFrame(step);
+      requestPageFrame(step);
     });
   }
 
@@ -804,13 +1179,17 @@
 
     let paintTimer = 0;
     const schedulePaint = () => {
-      window.clearTimeout(paintTimer);
-      paintTimer = window.setTimeout(paint, 120);
+      clearPageTimeout(paintTimer);
+      paintTimer = setPageTimeout(paint, 120);
     };
     textField.addEventListener("input", schedulePaint);
     textField.addEventListener("ra:content", schedulePaint);
     textField.addEventListener("scroll", () => { inner.style.transform = `translateY(${-textField.scrollTop}px)`; });
-    if (typeof ResizeObserver === "function") new ResizeObserver(syncBox).observe(textField);
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(syncBox);
+      observer.observe(textField);
+      observers.add(observer);
+    }
     paint();
   }
 
@@ -841,14 +1220,14 @@
         section.querySelectorAll(".note-list li").forEach((note) => lines.push(`- ${text(note)}`));
         section.querySelectorAll(".section-note").forEach((note) => lines.push(`_${text(note)}_`, ""));
       });
-      const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }));
+      const url = createPageObjectUrl(new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" }));
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = `${baseName}_review_notes.md`;
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setPageTimeout(() => revokePageObjectUrl(url), 1000);
       toast(messages.exported);
     });
   }
@@ -868,7 +1247,7 @@
     card.focus({ preventScroll: true });
     card.scrollIntoView({ block: "nearest", behavior: messages.reducedMotion.matches ? "auto" : "smooth" });
   };
-  document.addEventListener("keydown", (event) => {
+  listenGlobally(document, "keydown", (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
     const field = event.target.closest?.("input, textarea, select, [contenteditable]");
     if (field || shortcutsDialog?.open) return;
@@ -911,7 +1290,7 @@
       const extension = kind === "cleaned" ? "txt" : (button.dataset.sourceFormat || "txt").replace(/^\./, "");
       const filename = kind === "cleaned" ? `${baseName}_cleaned.txt` : `${baseName}_revision_preview.${extension}`;
       const blob = new Blob([source.value], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
+      const url = createPageObjectUrl(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = filename;
@@ -919,7 +1298,7 @@
       document.body.append(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setPageTimeout(() => revokePageObjectUrl(url), 1000);
     });
   });
 
@@ -930,4 +1309,10 @@
     heading?.scrollIntoView({ block: "start" });
     heading?.focus({ preventScroll: true });
   }
+    };
+
+    run();
+  };
+
+  initializePage();
 })();

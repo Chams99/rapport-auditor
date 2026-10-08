@@ -31,6 +31,15 @@ function check(condition, message) {
   assert.ok(condition, message);
 }
 
+function waitForPostResponse(page, pathname) {
+  const expectedOrigin = new URL(baseUrl).origin;
+  return page.waitForResponse((response) => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return request.method() === "POST" && url.origin === expectedOrigin && url.pathname === pathname;
+  });
+}
+
 function verifyNoHorizontalOverflow(metrics, label) {
   check(
     metrics.documentWidth <= metrics.viewportWidth,
@@ -255,10 +264,20 @@ async function main() {
 
     const baseline = fs.readFileSync(path.join(syntheticDir, "baseline_en.txt"), "utf8");
     await editor.fill(baseline);
-    const auditResponse = page.waitForNavigation({ waitUntil: "networkidle" });
+    const getDocumentUrl = page.url();
+    const enhancedPostCounts = new Map([["/audit", 0], ["/revise", 0]]);
+    page.on("request", (request) => {
+      if (request.method() !== "POST") return;
+      const url = new URL(request.url());
+      if (url.origin === new URL(baseUrl).origin && enhancedPostCounts.has(url.pathname)) {
+        enhancedPostCounts.set(url.pathname, enhancedPostCounts.get(url.pathname) + 1);
+      }
+    });
+    const auditResponsePromise = waitForPostResponse(page, "/audit");
     await page.locator('button[formaction="/audit"]').click();
-    const auditNavigation = await auditResponse;
-    const auditHeaders = auditNavigation ? await auditNavigation.request().allHeaders() : {};
+    const auditResponse = await auditResponsePromise;
+    const auditHeaders = await auditResponse.request().allHeaders();
+    await page.locator("#signals-heading").waitFor({ state: "visible" });
     const formInfo = await page.locator("#report-form").evaluate((form) => ({
       action: form.action,
       method: form.method,
@@ -268,9 +287,12 @@ async function main() {
       sandbox: window.frameElement?.getAttribute("sandbox") ?? null,
     }));
     check(
-      auditNavigation && auditNavigation.status() === 200,
-      `sample audit POST failed (${auditNavigation?.status() ?? "no response"}, origin=${auditHeaders.origin ?? "missing"}, referer=${auditHeaders.referer ?? "missing"}, fetch=${auditHeaders["sec-fetch-site"] ?? "missing"}, host=${auditHeaders.host ?? "missing"}, page=${await page.evaluate(() => location.origin)}, form=${JSON.stringify(formInfo)}): ${(await page.locator("body").innerText()).slice(0, 600)}`,
+      auditResponse.status() === 200,
+      `sample audit POST failed (${auditResponse.status()}, origin=${auditHeaders.origin ?? "missing"}, referer=${auditHeaders.referer ?? "missing"}, fetch=${auditHeaders["sec-fetch-site"] ?? "missing"}, host=${auditHeaders.host ?? "missing"}, page=${await page.evaluate(() => location.origin)}, form=${JSON.stringify(formInfo)}): ${(await page.locator("body").innerText()).slice(0, 600)}`,
     );
+    check(page.url() === getDocumentUrl, "enhanced audit should keep the original GET URL");
+    check(!new URL(page.url()).search.includes(baseline), "enhanced audit must not put the submitted draft in the URL");
+    check(enhancedPostCounts.get("/audit") === 1, "synthetic audit should issue exactly one POST");
     check(await page.locator("#signals-heading").count() === 1, "audit results did not render");
     check((await editor.inputValue()) === baseline, "review response failed to preserve the submitted draft");
     check(
@@ -297,14 +319,32 @@ async function main() {
     await page.screenshot({ path: path.join(screenshotDir, "sample-review.png"), fullPage: true });
     await page.screenshot({ path: path.join(screenshotDir, "synthetic-result-en-390.png"), fullPage: true });
 
-    const revisionNavigation = page.waitForNavigation({ waitUntil: "networkidle" });
+    const auditPostCountBeforeRefresh = enhancedPostCounts.get("/audit");
+    await page.reload({ waitUntil: "networkidle" });
+    check(page.url() === getDocumentUrl, "refresh after audit should return to the same GET URL");
+    check(enhancedPostCounts.get("/audit") === auditPostCountBeforeRefresh, "refresh after audit must not repeat the POST");
+    check(await page.locator("#signals-heading").count() === 0, "refresh after audit should load the GET page rather than replaying results");
+    check((await page.locator("#report-text").inputValue()) === "", "refresh after audit should not restore a draft from the URL");
+
+    await editor.fill(baseline);
+    const revisionResponsePromise = waitForPostResponse(page, "/revise");
     await page.locator('button[formaction="/revise"]').click();
-    check((await revisionNavigation)?.status() === 200, "JavaScript-enabled revision POST failed");
+    const revisionResponse = await revisionResponsePromise;
+    await page.locator("#changes-heading").waitFor({ state: "visible" });
+    check(revisionResponse.status() === 200, "JavaScript-enabled revision POST failed");
+    check(page.url() === getDocumentUrl, "enhanced revision should keep the original GET URL");
+    check(enhancedPostCounts.get("/revise") === 1, "synthetic revision should issue exactly one POST");
     check(await page.locator("#changes-heading").count() === 1, "revision result did not render");
     check(
       await page.evaluate(() => document.activeElement?.id) === "results-heading",
       "revision response did not focus the results heading",
     );
+    const revisionPostCountBeforeRefresh = enhancedPostCounts.get("/revise");
+    await page.reload({ waitUntil: "networkidle" });
+    check(page.url() === getDocumentUrl, "refresh after revision should return to the same GET URL");
+    check(enhancedPostCounts.get("/revise") === revisionPostCountBeforeRefresh, "refresh after revision must not repeat the POST");
+    check(await page.locator("#changes-heading").count() === 0, "refresh after revision should load the GET page rather than replaying results");
+    check((await page.locator("#report-text").inputValue()) === "", "refresh after revision should not restore a draft from the URL");
 
     // A second, explicitly synthetic LaTeX example demonstrates repetition,
     // formulaic phrasing, and human source-check prompts without real metrics.
@@ -320,9 +360,12 @@ async function main() {
       mimeType: "text/x-tex",
       buffer: findingsFixture,
     });
-    const findingsNavigation = findingsPage.waitForNavigation({ waitUntil: "networkidle" });
+    const findingsResponsePromise = waitForPostResponse(findingsPage, "/audit");
     await findingsPage.locator('button[formaction="/audit"]').click();
-    check((await findingsNavigation)?.status() === 200, "synthetic findings example audit failed");
+    const findingsResponse = await findingsResponsePromise;
+    await findingsPage.locator("#signals-heading").waitFor({ state: "visible" });
+    check(findingsResponse.status() === 200, "synthetic findings example audit failed");
+    check(new URL(findingsPage.url()).searchParams.get("locale") === "en", "enhanced findings audit should keep its English GET URL");
     const findingsText = await findingsPage.locator("body").innerText();
     check(findingsFixture.toString("utf8").startsWith("SYNTHETIC TEST"), "findings fixture must identify itself as synthetic");
     check(findingsText.includes("synthetic_review_prompts.tex"), "findings example source name was lost");

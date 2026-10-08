@@ -44,6 +44,10 @@ class FakeElement {
     this.listeners.set(type, listeners);
   }
 
+    removeEventListener(type, callback) {
+      this.listeners.set(type, (this.listeners.get(type) || []).filter((listener) => listener !== callback));
+    }
+
   dispatch(type, detail = {}) {
     let prevented = false;
     const event = {
@@ -65,6 +69,7 @@ class FakeElement {
 
   querySelectorAll(selector) {
     if (selector === 'button[type="submit"]') return this.submitButtons || [];
+    if (selector === "textarea, input[type='file'], select, button[type='button']") return this.controls || [];
     return this.selectorLists?.get(selector) || [];
   }
 
@@ -130,6 +135,117 @@ class FakeDataTransfer {
   }
 }
 
+function makeResponseDocument({ locale = "en", mode = "audit", text = "server result draft", error = false, unsafe = false, unsafeAttributes = false, unsafeStyleElement = false, unsafeStyleAttribute = false, unsafeSvgHref = false, safeSvgFragment = false, unsafeFormAction = false, replaceBody }) {
+  const elements = new Map();
+  const add = (id, element = new FakeElement(id)) => { elements.set(id, element); return element; };
+  const form = add("report-form");
+  form.action = "/audit";
+  form.method = "post";
+  form.dataset.maxChars = "5";
+  form.controls = [];
+  const responseAuditButton = new FakeButton("Review", "button");
+  responseAuditButton.formAction = "/audit";
+  const responseReviseButton = new FakeButton("Revise", "button");
+  responseReviseButton.formAction = unsafeFormAction ? "https://other.test/revise" : "/revise";
+  form.submitButtons = [responseAuditButton, responseReviseButton];
+  const csrf = add("csrf-token", new FakeElement("csrf-token", "input"));
+  form.selectors.set('input[name="csrf_token"]', csrf);
+  const textField = add("report-text", new FakeElement("report-text", "textarea"));
+  textField.value = text;
+  const language = add("content-language", new FakeElement("content-language", "select"));
+  language.value = locale;
+  const file = add("report-file", new FakeElement("report-file", "input"));
+  const format = add("source-format", new FakeElement("source-format", "select"));
+  format.value = "txt";
+  const count = add("character-count");
+  const status = add("submission-status");
+  const dropZone = add("drop-zone");
+  const page = add("page-content");
+  page.dataset.mode = mode;
+  form.controls = [textField, file, language, format];
+  const main = add("main-content", new FakeElement("main-content", "main"));
+  const alert = error ? new FakeElement("form-alert") : null;
+  const body = new FakeElement("body", "body");
+  const html = new FakeElement("html", "html");
+  html.lang = locale;
+  const queries = new Map([
+    [".page-content", page],
+    ["[data-dropzone]", dropZone],
+    [".form-alert", alert],
+    [".results-scroll", null],
+    [".results-heading-row .status-pill", null],
+  ]);
+  body.responseElements = elements;
+  body.responseQueries = queries;
+  body.responseLang = locale;
+  body.selectors.set("#report-file", file);
+  body.replaceWith = replaceBody;
+  let dangerousNode = null;
+  let unsafeAttributeNode = null;
+  let styleNode = null;
+  let svgResourceNode = null;
+  let safeSvgNode = null;
+  if (unsafe || unsafeAttributes || unsafeStyleElement || unsafeStyleAttribute || unsafeSvgHref || safeSvgFragment) {
+    if (unsafe) {
+      dangerousNode = new FakeElement("unexpected-script", "script");
+      dangerousNode.wasRemoved = false;
+      dangerousNode.remove = () => { dangerousNode.wasRemoved = true; };
+    }
+    if (unsafeStyleElement) styleNode = new FakeElement("unexpected-style", "style");
+    if (unsafeAttributes) {
+      unsafeAttributeNode = {
+        attributes: [
+          { name: "onclick", value: "alert(1)" },
+          { name: "href", value: "javascript:alert(1)" },
+          { name: "src", value: "https://other.test/asset" },
+        ],
+        removedAttributes: [],
+        removeAttribute(name) { this.removedAttributes.push(name); },
+      };
+    }
+    if (unsafeStyleAttribute) {
+      unsafeAttributeNode = {
+        attributes: [{ name: "style", value: "background-image:url(https://other.test/track)" }],
+        removedAttributes: [],
+        removeAttribute(name) { this.removedAttributes.push(name); },
+      };
+    }
+    if (unsafeSvgHref || safeSvgFragment) {
+      const svgNode = {
+        localName: unsafeSvgHref ? "image" : "use",
+        namespaceURI: "http://www.w3.org/2000/svg",
+        attributes: [{ name: "href", value: unsafeSvgHref ? "https://other.test/sprite.svg#icon" : "#icon" }],
+      };
+      if (unsafeSvgHref) svgResourceNode = svgNode;
+      else safeSvgNode = svgNode;
+    }
+    body.selectorLists = new Map([
+      ["script, iframe, object, embed, audio, video, source, track, img, base, link, style, meta[http-equiv]", [dangerousNode, styleNode].filter(Boolean)],
+      ["*", [unsafeAttributeNode, svgResourceNode, safeSvgNode].filter(Boolean)],
+    ]);
+  }
+  return {
+    body,
+    documentElement: html,
+    title: "Synthetic response",
+    unsafeNodes: { dangerousNode, unsafeAttributeNode, styleNode, svgResourceNode },
+    getElementById: (id) => elements.get(id) || null,
+    querySelector: (selector) => queries.get(selector) || null,
+    querySelectorAll: () => [],
+  };
+}
+
+function fakeHtmlResponse({ status = 200, ok = status < 400, url = "https://rapport.test/audit", redirect = false } = {}) {
+  return {
+    status,
+    ok,
+    url,
+    redirected: redirect,
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? "text/html; charset=utf-8" : "100") },
+    text: async () => "<synthetic server response>",
+  };
+}
+
 function makeButton(label, loadingEn, loadingFr) {
   const button = new FakeButton("", "button");
   button.dataset.loadingLabelEn = loadingEn;
@@ -141,12 +257,14 @@ function makeButton(label, loadingEn, loadingFr) {
   return button;
 }
 
-function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, results = false, downloads = false } = {}) {
+function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, results = false, downloads = false, initialText = "", formError = false, enhanced = false, fetchHandler = null } = {}) {
   const elements = new Map();
   const add = (id, element = new FakeElement(id)) => { elements.set(id, element); return element; };
   const form = add("report-form");
   form.dataset.maxChars = "5";
+  form.action = "/audit";
   const text = add("report-text");
+  text.value = initialText;
   const language = add("content-language");
   language.value = locale;
   const file = add("report-file");
@@ -182,6 +300,7 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
   const fileName = fileControls ? add("file-name") : null;
   const removeFile = fileControls ? add("remove-file", new FakeButton("remove-file", "button")) : null;
   if (removeFile) { removeFile.hidden = true; removeFile.disabled = true; }
+  form.controls = [text, file, language, format, clear, example, removeFile].filter(Boolean);
   const fileError = add("file-error");
   fileError.hidden = true;
   const textError = add("text-error");
@@ -189,6 +308,7 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
   const status = add("submission-status");
   const page = add("page-content");
   page.dataset.mode = "input";
+  const dropZone = add("drop-zone");
   const auditButton = makeButton("Review", "Reviewing…", "Analyse…");
   const reviseButton = makeButton("Revise", "Preparing…", "Préparation…");
   form.submitButtons = [auditButton, reviseButton];
@@ -216,6 +336,7 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
     statusPill = new FakeElement("", "span");
     statusPill.lastChild = { textContent: "Ready" };
   }
+  const formAlert = formError ? add("form-alert") : null;
 
   const sourceHeading = new FakeElement("", "h3");
   sourceHeading.dataset.sourceName = "Student Draft/Final.txt";
@@ -230,12 +351,15 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
 
   const queryOne = new Map([
     [".page-content", page],
+    ["[data-dropzone]", dropZone],
+    [".form-alert", formAlert],
     [".results-scroll", resultsScroll],
     [".results-heading-row .status-pill", statusPill],
     ["[data-export-notes]", downloads ? exportButton : null],
     [".source-name", downloads ? sourceHeading : null],
     ['[data-download-source="cleaned"]', downloads ? cleanedSource : null],
   ]);
+  const documentListeners = new Map();
   const document = {
     documentElement,
     body,
@@ -259,21 +383,50 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
       created.push(element);
       return element;
     },
-    addEventListener() {},
+    importNode: (node) => node,
+    addEventListener(type, callback) {
+      const listeners = documentListeners.get(type) || [];
+      listeners.push(callback);
+      documentListeners.set(type, listeners);
+    },
+    removeEventListener(type, callback) {
+      documentListeners.set(type, (documentListeners.get(type) || []).filter((listener) => listener !== callback));
+    },
+    title: "Synthetic home",
   };
+  const replaceBody = (newBody) => {
+    document.body = newBody;
+    elements.clear();
+    newBody.responseElements?.forEach((element, id) => elements.set(id, element));
+    queryOne.clear();
+    newBody.responseQueries?.forEach((element, selector) => queryOne.set(selector, element));
+    document.documentElement.lang = newBody.responseLang || "en";
+  };
+  body.replaceWith = replaceBody;
 
   let nextConfirm = true;
   let nextTimer = 0;
+  const windowTimers = new Map();
   const windowListeners = new Map();
   const window = {
     isSecureContext: false,
+    location: { href: "https://rapport.test/" },
     confirm: () => nextConfirm,
-    setTimeout: () => ++nextTimer,
-    clearTimeout() {},
+    setTimeout(callback, delay = 0) {
+      const id = ++nextTimer;
+      windowTimers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) { windowTimers.delete(id); },
+    requestAnimationFrame: () => ++nextTimer,
+    cancelAnimationFrame() {},
     addEventListener(type, callback) {
       const listeners = windowListeners.get(type) || [];
       listeners.push(callback);
       windowListeners.set(type, listeners);
+    },
+    removeEventListener(type, callback) {
+      windowListeners.set(type, (windowListeners.get(type) || []).filter((listener) => listener !== callback));
     },
     dispatch(type, detail = {}) {
       let prevented = false;
@@ -281,6 +434,32 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
       for (const callback of windowListeners.get(type) || []) callback(event);
       return { event, prevented };
     },
+    runTimers(maxDelay = Infinity) {
+      for (const [id, timer] of [...windowTimers]) {
+        if (timer.delay > maxDelay) continue;
+        windowTimers.delete(id);
+        timer.callback();
+      }
+    },
+  };
+  const fetchCalls = [];
+  class FakeFormData {
+    constructor(formElement) { this.form = formElement; this.fields = []; }
+    append(name, value) { this.fields.push([name, value]); }
+  }
+  let responsePage = makeResponseDocument({
+    locale,
+    mode: "audit",
+    text: "Reviewed draft.",
+    replaceBody,
+  });
+  class FakeDOMParser {
+    parseFromString() { return responsePage; }
+  }
+  const fetchMock = async (url, options) => {
+    fetchCalls.push({ url, options });
+    if (!fetchHandler) throw new Error("unexpected fetch");
+    return fetchHandler(url, options);
   };
   const URL = {
     createObjectURL: () => `blob:synthetic-${downloaded.length}`,
@@ -296,15 +475,24 @@ function boot({ locale = "en", optionalFormHelpers = true, fileControls = true, 
     Event: FakeEvent,
     DataTransfer: FakeDataTransfer,
     Intl,
-    URL,
+    URL: enhanced ? global.URL : URL,
+    fetch: enhanced ? fetchMock : undefined,
+    FormData: enhanced ? FakeFormData : undefined,
+    DOMParser: enhanced ? FakeDOMParser : undefined,
+    AbortController: enhanced ? AbortController : undefined,
+    TextEncoder,
+    TextDecoder,
     Blob: class Blob {},
     console,
   }, { filename: "app.js" });
   window.dispatch("pageshow", { persisted: false });
   return {
     elements, form, text, language, file, format, count, clear, example, copySample, fileChip, fileName, removeFile,
-    fileError, textError, status, auditButton, reviseButton, page, body, documentElement, window, downloaded,
-    resultsScroll, sourceHeading, exportButton, downloadButton,
+    fileError, textError, status, auditButton, reviseButton, page, body, documentElement, document, window, downloaded,
+    resultsScroll, sourceHeading, exportButton, downloadButton, windowListeners, documentListeners,
+    fetchCalls,
+    setResponseFactory(factory) { responsePage = factory(); },
+    setResponsePage(options) { responsePage = makeResponseDocument({ ...options, replaceBody }); return responsePage; },
     setConfirm(value) { nextConfirm = value; },
   };
 }
@@ -420,6 +608,29 @@ function testOptionalHooksSubmissionAndBfcache() {
   assert.deepEqual(resultsUi.resultsScroll.children.map((child) => child.hidden), [false, true], "BFCache restores only the original result visibility states");
 }
 
+function testServerRenderedDraftIsCleanUntilEdited() {
+  const ui = boot({ results: true, initialText: "Previously analyzed draft." });
+  assert.equal(ui.window.dispatch("beforeunload").prevented, false, "server-rendered analysis text is the clean page baseline");
+
+  ui.text.value = "Previously analyzed draft with a new edit.";
+  ui.text.dispatch("input");
+  assert.equal(ui.window.dispatch("beforeunload").prevented, true, "a change from the server-rendered baseline warns before navigation");
+
+  ui.text.value = "Previously analyzed draft.";
+  ui.text.dispatch("input");
+  assert.equal(ui.window.dispatch("beforeunload").prevented, false, "restoring the original server-rendered text clears the warning");
+
+  ui.window.dispatch("pageshow", { persisted: true });
+  assert.equal(ui.window.dispatch("beforeunload").prevented, false, "BFCache restoration keeps the analyzed text clean");
+
+  ui.text.value = "";
+  ui.text.dispatch("input");
+  assert.equal(ui.window.dispatch("beforeunload").prevented, true, "clearing a server-rendered draft is still an unsaved change");
+
+  const errorUi = boot({ initialText: "Retained after validation error.", formError: true });
+  assert.equal(errorUi.window.dispatch("beforeunload").prevented, true, "a draft retained on a server validation page is not treated as a clean result baseline");
+}
+
 function testOriginalSourceNamesDriveDownloadNames() {
   const ui = boot({ downloads: true });
   ui.downloadButton.click();
@@ -429,7 +640,233 @@ function testOriginalSourceNamesDriveDownloadNames() {
   assert.equal(ui.downloaded.at(-1).download, "Student Draft-Final_review_notes.md", "localized display names must not replace the original source filename");
 }
 
-testFileEnhancementAndUndo();
-testOptionalHooksSubmissionAndBfcache();
-testOriginalSourceNamesDriveDownloadNames();
-console.log("app state regressions passed");
+async function testEnhancedSuccessKeepsGetUrlAndReinitializesOnePage() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => fakeHtmlResponse(),
+  });
+  ui.setResponsePage({ locale: "fr", mode: "audit", text: "Reviewed draft." });
+  ui.auditButton.formAction = "/audit";
+  const submitted = ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(submitted.prevented, true, "enhanced submission prevents POST navigation");
+  assert.equal(ui.fetchCalls.length, 1);
+  assert.equal(ui.fetchCalls[0].url, "https://rapport.test/audit");
+  assert.equal(ui.fetchCalls[0].options.method, "POST");
+  assert.equal(ui.fetchCalls[0].options.credentials, "same-origin");
+  assert.equal(ui.fetchCalls[0].options.mode, "same-origin");
+  assert.equal(ui.fetchCalls[0].options.redirect, "error");
+  assert.equal(ui.fetchCalls[0].options.cache, "no-store");
+  assert.equal(ui.text.disabled, true, "form controls are locked only while the request is in flight");
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.window.location.href, "https://rapport.test/", "the browser remains on the GET document URL");
+  assert.equal(ui.document.title, "Synthetic response");
+  assert.equal(ui.document.documentElement.lang, "fr");
+  assert.equal(ui.document.body.dataset.enhancedResult, "true");
+  assert.equal(ui.elements.get("report-text").value, "Reviewed draft.");
+  assert.equal(ui.windowListeners.get("pageshow").length, 1, "the old page's global listeners are disposed before reinitializing");
+  assert.equal(ui.documentListeners.get("keydown").length, 1, "document shortcuts do not accumulate after a response swap");
+  assert.equal(ui.window.dispatch("beforeunload").prevented, false, "a successful rendered result is the clean baseline");
+}
+
+async function testEnhancedNetworkFailureKeepsDraftAndNeverRetries() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => { throw new Error("synthetic network failure"); },
+  });
+  ui.file.files = [{ name: "chapter.tex", size: 64 }];
+  ui.file.dispatch("change");
+  const submitted = ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(submitted.prevented, true);
+  assert.equal(ui.fetchCalls.length, 1);
+  assert.equal(ui.text.disabled, true);
+  assert.equal(ui.file.disabled, true);
+  assert.equal(ui.example.disabled, true, "other form actions are locked during a request");
+  const dropped = ui.form.dispatch("drop", {
+    dataTransfer: { types: ["Files"], files: [{ name: "replacement.txt", size: 16 }] },
+  });
+  assert.equal(dropped.prevented, true, "drop navigation remains blocked during a request");
+  assert.equal(ui.file.files[0].name, "chapter.tex", "a drop cannot replace the submitted file while the request is in flight");
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.fetchCalls.length, 1, "a failed fetch must never trigger a duplicate native POST");
+  assert.equal(ui.elements.get("report-text").value, "Draft");
+  assert.equal(ui.file.files[0].name, "chapter.tex");
+  assert.equal(ui.text.disabled, false);
+  assert.equal(ui.file.disabled, false);
+  assert.equal(ui.example.disabled, false);
+  assert.equal(ui.auditButton.disabled, false);
+  assert.equal(ui.body.children.some((child) => child.classList.contains("top-progress")), false);
+  assert.equal(ui.status.getAttribute("role"), "alert");
+  ui.window.runTimers(30);
+  assert.match(ui.status.textContent, /still here/);
+  assert.equal(ui.window.dispatch("beforeunload").prevented, true, "the retained draft remains protected after failure");
+}
+
+async function testEnhancedServerErrorKeepsTextAndSelectedFileDirty() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => fakeHtmlResponse({ status: 413, ok: false }),
+  });
+  ui.setResponsePage({ locale: "en", mode: "input", text: "server omitted file", error: true });
+  ui.file.files = [{ name: "chapter.tex", size: 64 }];
+  ui.file.dispatch("change");
+  ui.form.dispatch("submit", { submitter: ui.auditButton });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(ui.fetchCalls.length, 1);
+  assert.equal(ui.document.body.dataset.enhancedResult, "false");
+  assert.equal(ui.elements.get("report-text").value, "Draft");
+  assert.equal(ui.elements.get("report-file").files[0].name, "chapter.tex", "a server error keeps the selected file when FileList transfer is available");
+  assert.equal(ui.document.querySelector(".form-alert") !== null, true);
+  assert.equal(ui.window.dispatch("beforeunload").prevented, true, "server error submissions remain dirty rather than becoming a clean baseline");
+}
+
+async function testEnhancedUnexpected500DoesNotReplaceOrRetry() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => fakeHtmlResponse({ status: 500, ok: false }),
+  });
+  ui.setResponsePage({ locale: "en", mode: "input", text: "server error" });
+  const originalBody = ui.document.body;
+  ui.form.dispatch("submit", { submitter: ui.auditButton });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.fetchCalls.length, 1, "an unexpected 500 is not retried automatically");
+  assert.equal(ui.document.body, originalBody, "unexpected server pages leave the current form in place");
+  assert.equal(ui.text.value, "Draft");
+  assert.equal(ui.text.disabled, false);
+}
+
+async function testEnhancedRejectsCrossOriginResponse() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => fakeHtmlResponse({ url: "https://other.test/audit" }),
+  });
+  const originalBody = ui.document.body;
+  ui.form.dispatch("submit", { submitter: ui.auditButton });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.fetchCalls.length, 1);
+  assert.equal(ui.document.body, originalBody, "a response from another origin is never adopted");
+  assert.equal(ui.text.value, "Draft");
+  assert.equal(ui.auditButton.disabled, false);
+}
+
+async function testEnhancedRejectsActiveResponseMarkup() {
+  for (const unsafe of [
+    { unsafe: true },
+    { unsafeAttributes: true },
+    { unsafeStyleElement: true },
+    { unsafeStyleAttribute: true },
+    { unsafeSvgHref: true },
+    { unsafeFormAction: true },
+  ]) {
+    const ui = boot({
+      enhanced: true,
+      initialText: "Draft",
+      fetchHandler: async () => fakeHtmlResponse(),
+    });
+    const parsed = ui.setResponsePage({ locale: "en", mode: "audit", text: "unsafe result", ...unsafe });
+    const originalBody = ui.document.body;
+    ui.form.dispatch("submit", { submitter: ui.auditButton });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ui.document.body, originalBody, "active returned markup is rejected before adoption");
+    if (parsed.unsafeNodes.dangerousNode) assert.equal(parsed.unsafeNodes.dangerousNode.wasRemoved, false, "the response is rejected rather than silently modified");
+    if (parsed.unsafeNodes.unsafeAttributeNode) assert.deepEqual(parsed.unsafeNodes.unsafeAttributeNode.removedAttributes, []);
+    assert.equal(ui.text.value, "Draft");
+  }
+}
+
+async function testEnhancedAllowsFragmentSvgReferences() {
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async () => fakeHtmlResponse(),
+  });
+  const parsed = ui.setResponsePage({ locale: "en", mode: "audit", text: "safe result", safeSvgFragment: true });
+  ui.form.dispatch("submit", { submitter: ui.auditButton });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.document.body, parsed.body, "same-document SVG fragment references remain valid");
+}
+
+async function testEnhancedRequestHasBoundedAbortTimeout() {
+  let abortObserved = false;
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        abortObserved = true;
+        reject(new Error("synthetic timeout"));
+      }, { once: true });
+    }),
+  });
+  ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(ui.fetchCalls.length, 1);
+  ui.window.runTimers(20000);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(abortObserved, true, "the request controller aborts at the bounded timeout");
+  assert.equal(ui.text.disabled, false, "the timeout restores form controls");
+  assert.equal(ui.auditButton.disabled, false);
+  assert.equal(ui.window.dispatch("beforeunload").prevented, false, "the clean baseline remains clean after timeout");
+}
+
+async function testStaleRequestCannotResetNewSubmission() {
+  let resolveFirst;
+  let resolveSecond;
+  const ui = boot({
+    enhanced: true,
+    initialText: "Draft",
+    fetchHandler: () => new Promise((resolve, reject) => {
+      if (ui.fetchCalls.length === 1) resolveFirst = resolve;
+      else resolveSecond = resolve;
+    }),
+  });
+  ui.setResponsePage({ locale: "en", mode: "audit", text: "Latest result." });
+  const first = ui.form.dispatch("submit", { submitter: ui.auditButton });
+  assert.equal(first.prevented, true);
+  assert.equal(ui.fetchCalls.length, 1);
+
+  ui.window.dispatch("pageshow", { persisted: true });
+  ui.form.dispatch("submit", { submitter: ui.reviseButton });
+  assert.equal(ui.fetchCalls.length, 2);
+  assert.equal(ui.text.disabled, true, "the second request owns the disabled controls");
+  assert.equal(ui.reviseButton.disabled, true);
+
+  resolveFirst(fakeHtmlResponse());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.text.disabled, true, "a late first response cannot restore controls owned by the second request");
+  assert.equal(ui.reviseButton.disabled, true);
+  assert.equal(ui.document.body.dataset.enhancedResult, undefined, "a stale result cannot replace the active page");
+
+  resolveSecond(fakeHtmlResponse());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.document.body.dataset.enhancedResult, "true", "the active response still replaces the page normally");
+  assert.equal(ui.elements.get("report-text").value, "Latest result.");
+}
+
+async function run() {
+  testFileEnhancementAndUndo();
+  testOptionalHooksSubmissionAndBfcache();
+  testServerRenderedDraftIsCleanUntilEdited();
+  testOriginalSourceNamesDriveDownloadNames();
+  await testEnhancedSuccessKeepsGetUrlAndReinitializesOnePage();
+  await testEnhancedNetworkFailureKeepsDraftAndNeverRetries();
+  await testEnhancedServerErrorKeepsTextAndSelectedFileDirty();
+  await testEnhancedUnexpected500DoesNotReplaceOrRetry();
+  await testEnhancedRejectsCrossOriginResponse();
+  await testEnhancedRejectsActiveResponseMarkup();
+  await testEnhancedAllowsFragmentSvgReferences();
+  await testEnhancedRequestHasBoundedAbortTimeout();
+  await testStaleRequestCannotResetNewSubmission();
+  console.log("app state regressions passed");
+}
+
+run().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -8,7 +8,7 @@ import rapport_api.config as config_module
 from rapport_api import create_app
 from rapport_api.config import ConfigurationError, load_environment
 from rapport_api.limiting import RateLimitUnavailable
-from rapport_api.workers import LocalAnalysisRunner
+from rapport_api.workers import LocalAnalysisRunner, WorkerCapacityError
 
 
 PUBLIC_HOST = "auditor.example.test"
@@ -40,6 +40,16 @@ class _UnavailableLimiter:
 
     def ready(self) -> bool:
         return False
+
+
+class _BusyHealthyRunner:
+    available = False
+
+    def ready(self) -> bool:
+        return True
+
+    def run(self, *_args):
+        raise WorkerCapacityError("synthetic full worker slot")
 
 
 def _valid_server_env() -> dict[str, str]:
@@ -138,6 +148,27 @@ def test_server_live_stays_healthy_while_readiness_fails_closed_on_limiter_outag
     assert ready.status_code == 503
     assert ready.get_json() == {"status": "not_ready"}
     assert "redis" not in ready.get_data(as_text=True).lower()
+
+
+def test_server_readiness_stays_healthy_when_worker_is_busy_but_new_work_is_rejected(mock_posix_capability):
+    app = _server_test_app()
+    app.extensions["rapport_auditor.analysis_runner"] = _BusyHealthyRunner()
+    client = app.test_client()
+    bootstrap = client.get("/api/v1/csrf", base_url=PUBLIC_ORIGIN)
+    token = bootstrap.get_json()["csrf_token"]
+
+    ready = client.get("/api/v1/health/ready", base_url=PUBLIC_ORIGIN)
+    audit = client.post(
+        "/api/v1/audit",
+        json={"text": "Synthetic capacity check.", "content_language": "en"},
+        headers={"Origin": PUBLIC_ORIGIN, "X-CSRF-Token": token},
+        base_url=PUBLIC_ORIGIN,
+    )
+
+    assert ready.status_code == 200
+    assert ready.get_json() == {"status": "ready"}
+    assert audit.status_code == 503
+    assert audit.get_json()["error"]["code"] == "service_unavailable"
 
 
 def test_server_origin_rejection_has_non_content_request_id_and_no_secret(mock_posix_capability):

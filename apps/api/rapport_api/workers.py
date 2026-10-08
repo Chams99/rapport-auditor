@@ -360,13 +360,15 @@ class BoundedAnalysisWorkers:
 
     def ready(self) -> bool:
         with self._ready_lock:
-            if not self.available:
-                return False
             if self._startup_checked:
                 if self._startup_ok:
+                    # A ready worker subsystem remains ready while its bounded
+                    # request slot is occupied; capacity is enforced by run().
                     return True
                 if time.monotonic() < self._startup_retry_after:
                     return False
+            if not self.available:
+                return False
             try:
                 self._startup_ok = self.run("health") is True
             except (WorkerCapacityError, WorkerTimeoutError, WorkerFailure):

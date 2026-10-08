@@ -28,7 +28,7 @@ services:
       RAPPORT_AUDITOR_RATE_LIMIT_WINDOW_SECONDS: "60"
       RAPPORT_AUDITOR_RATE_LIMIT_MAX_CLIENTS: "4096"
       RAPPORT_AUDITOR_REDIS_TIMEOUT_SECONDS: "0.5"
-      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "${RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS:-2}"
+      RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS: "${RAPPORT_AUDITOR_ANALYSIS_MAX_WORKERS:-1}"
       RAPPORT_AUDITOR_ANALYSIS_TIMEOUT_SECONDS: "10"
       RAPPORT_AUDITOR_WORKER_MEMORY_MB: "512"
       RAPPORT_AUDITOR_WORKER_CPU_SECONDS: "8"
@@ -42,6 +42,7 @@ services:
       redis:
         condition: service_healthy
     mem_limit: ${RAPPORT_AUDITOR_APP_MEMORY_LIMIT:?Set the Rapport app memory limit after checking VPS capacity}
+    memswap_limit: ${RAPPORT_AUDITOR_APP_MEMORY_LIMIT:?Set the Rapport app memory limit after checking VPS capacity}
     cpus: ${RAPPORT_AUDITOR_APP_CPU_LIMIT:?Set the Rapport app CPU limit after checking VPS capacity}
     pids_limit: 32
     cap_drop:

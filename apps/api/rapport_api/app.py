@@ -945,19 +945,18 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
     def api_health_ready() -> Response:
         limiter = app.extensions["rapport_auditor.rate_limiter"]
         runner = app.extensions["rapport_auditor.analysis_runner"]
-        ready = getattr(runner, "available", True)
-        if callable(ready):
-            ready = ready()
+        ready = True
         if hasattr(limiter, "ready"):
-            ready = bool(ready and limiter.ready())
-        worker_ready = getattr(runner, "ready", None)
-        if callable(worker_ready):
-            ready = bool(ready and worker_ready())
-        else:
-            available = getattr(runner, "available", True)
-            if callable(available):
-                available = available()
-            ready = bool(ready and available)
+            ready = bool(limiter.ready())
+        if ready:
+            worker_ready = getattr(runner, "ready", None)
+            if callable(worker_ready):
+                ready = bool(worker_ready())
+            else:
+                available = getattr(runner, "available", True)
+                if callable(available):
+                    available = available()
+                ready = bool(available)
         if not ready:
             response = jsonify({"status": "not_ready"})
             response.status_code = 503
