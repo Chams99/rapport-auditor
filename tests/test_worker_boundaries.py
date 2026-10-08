@@ -136,11 +136,17 @@ def test_worker_deadline_kills_and_reaps_child_then_releases_capacity(monkeypatc
 
 
 def test_worker_readiness_stays_true_during_a_real_busy_slot_then_times_out_and_reaps(monkeypatch):
-    runner = _runner(timeout=1.2)
+    # The first readiness check spawns Python and imports the worker module. On
+    # a shared VPS that startup can exceed the short request-deadline test below
+    # without indicating an unhealthy worker, so give only this probe room.
+    runner = _runner(timeout=10.0)
     children_before = {child.pid for child in multiprocessing.active_children()}
     monkeypatch.setattr(worker_module, "_worker_entry", _quick_health_worker)
     assert runner.ready()
 
+    # Keep the actual occupied-slot request deadline short and below the
+    # worker's four-second hold, so this still verifies timeout cleanup.
+    runner.timeout_seconds = 3.0
     monkeypatch.setattr(worker_module, "_worker_entry", _slow_test_worker)
     outcome: list[BaseException] = []
 
@@ -152,7 +158,7 @@ def test_worker_readiness_stays_true_during_a_real_busy_slot_then_times_out_and_
 
     thread = threading.Thread(target=occupy_slot, daemon=True)
     thread.start()
-    wait_until = time.monotonic() + 0.8
+    wait_until = time.monotonic() + 2.6
     live_children = []
     while time.monotonic() < wait_until:
         live_children = [
@@ -173,7 +179,7 @@ def test_worker_readiness_stays_true_during_a_real_busy_slot_then_times_out_and_
         with pytest.raises(WorkerCapacityError):
             runner.run("audit")
     finally:
-        thread.join(timeout=2.0)
+        thread.join(timeout=4.0)
 
     assert not thread.is_alive()
     assert len(outcome) == 1
