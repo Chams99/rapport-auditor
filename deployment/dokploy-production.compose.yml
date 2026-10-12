@@ -1,0 +1,97 @@
+name: rapport-auditor-wtle2h
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: false
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 2g
+    pids_limit: 32
+    env_file:
+      - path: /etc/dokploy/private-runtime/rapport-auditor/app.runtime.env
+        format: raw
+    entrypoint:
+      - rapport-auditor
+    expose:
+      - "5000"
+    volumes:
+      - type: bind
+        source: /etc/dokploy/private-runtime/rapport-auditor/rapport_secret_key
+        target: /run/secrets/rapport_secret_key
+        read_only: true
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,urllib.request; u='http://127.0.0.1:5000/api/v1/health/ready'; h=os.environ['RAPPORT_AUDITOR_TRUSTED_HOSTS'].split(',')[0]; urllib.request.urlopen(urllib.request.Request(u,headers={'Host':h}),timeout=2).read()"
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    networks:
+      redis-private: {}
+      dokploy-network: {}
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: dokploy-network
+      traefik.http.routers.rapport-auditor.entrypoints: websecure
+      traefik.http.routers.rapport-auditor.rule: "Host(`rapport.chames.tn`)"
+      traefik.http.routers.rapport-auditor.tls: "true"
+      traefik.http.routers.rapport-auditor.tls.certresolver: letsencrypt
+      traefik.http.routers.rapport-auditor.middlewares: default-chain@file,rapport-auditor-inflight,rapport-auditor-request-cap
+      traefik.http.services.rapport-auditor.loadbalancer.server.port: "5000"
+      traefik.http.middlewares.rapport-auditor-inflight.inflightreq.amount: "8"
+      traefik.http.middlewares.rapport-auditor-request-cap.buffering.maxRequestBodyBytes: "1100000"
+      traefik.http.middlewares.rapport-auditor-request-cap.buffering.memRequestBodyBytes: "1100000"
+
+  redis:
+    image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 32
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - ""
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - redis-private
+
+volumes:
+  redis-data:
+    external: true
+    name: rapport-auditor-traefik_redis_rate_state
+
+networks:
+  redis-private:
+    external: true
+    name: rapport-auditor-traefik_redis_net
+  dokploy-network:
+    external: true
