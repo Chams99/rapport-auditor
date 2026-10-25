@@ -49,7 +49,7 @@ class CitationCue:
     syntax: str
     keys: list[str]
     line: int
-    sentence_index: int
+    sentence_index: int | None
     excerpt: str
 
 
@@ -538,23 +538,26 @@ def _source_lines(text: str, is_tex: bool, marker_prefix: str) -> tuple[list[str
     dropped_environment: str | None = None
     math_state: dict[str, str] = {}
     for line_number, raw_line in enumerate(lines, start=1):
+        source_line = raw_line[: _find_comment_start(raw_line)] if is_tex else raw_line
         if is_tex and dropped_environment:
-            if re.search(rf"\\end\{{{re.escape(dropped_environment)}\}}", raw_line):
+            end_match = re.search(rf"\\end\{{{re.escape(dropped_environment)}\}}", source_line)
+            if end_match:
                 dropped_environment = None
-            processed.append("")
-            continue
+                source_line = source_line[end_match.end() :]
+            else:
+                processed.append("")
+                continue
         if is_tex:
-            start_env = re.search(r"\\begin\{([^}]+)\}", raw_line)
+            start_env = re.search(r"\\begin\{([^}]+)\}", source_line)
             if start_env and start_env.group(1) in LATEX_DROP_ENVIRONMENTS:
                 env = start_env.group(1)
-                end_match = re.search(rf"\\end\{{{re.escape(env)}\}}", raw_line[start_env.end() :])
+                end_match = re.search(rf"\\end\{{{re.escape(env)}\}}", source_line[start_env.end() :])
                 if not end_match:
                     dropped_environment = env
                     processed.append("")
                     continue
-                raw_line = raw_line[: start_env.start()] + " " + raw_line[start_env.end() + end_match.end() :]
-        comment_start = _find_comment_start(raw_line) if is_tex else len(raw_line)
-        source_for_scan = raw_line[:comment_start]
+                source_line = source_line[: start_env.start()] + " " + source_line[start_env.end() + end_match.end() :]
+        source_for_scan = source_line
         if is_tex:
             prose_for_scan = _mask_tex_nonprose(source_for_scan, math_state)
             spans = _citation_spans(prose_for_scan, line_number, marker_prefix)
@@ -637,12 +640,14 @@ def _sentence_spans(
 ) -> list[tuple[str, int, int, tuple[str, ...]]]:
     if not text.strip():
         return []
-    boundaries: list[int] = []
-    for index, char in enumerate(text):
-        if char not in ".!?…":
+    sentence_boundaries: list[int] = []
+    index = 0
+    while index < len(text):
+        if text[index] not in ".!?…":
+            index += 1
             continue
-        marker_match = _CITATION_MARKER_RE.match(text, index + 1)
-        if marker_match:
+        if _CITATION_MARKER_RE.match(text, index + 1):
+            index += 1
             continue
         cursor = index + 1
         while cursor < len(text) and text[cursor] in ".!?…":
@@ -666,12 +671,29 @@ def _sentence_spans(
                     break
                 citation_end = marker.end()
             boundary_end = citation_end
-            boundaries.append(boundary_end)
+            if not sentence_boundaries or sentence_boundaries[-1] != boundary_end:
+                sentence_boundaries.append(boundary_end)
+        # Consume punctuation as one run; rescanning each suffix made a long
+        # repeated-punctuation run quadratic in the input length.
+        index = cursor
+    paragraph_boundaries: list[int] = []
     for match in re.finditer(r"\n\s*\n+", text):
         if match.start() > 0 and match.end() < len(text):
-            boundaries.append(match.start())
-            boundaries.append(match.end())
-    boundaries = sorted(set(boundaries))
+            paragraph_boundaries.extend((match.start(), match.end()))
+    boundaries: list[int] = []
+    sentence_index = paragraph_index = 0
+    while sentence_index < len(sentence_boundaries) or paragraph_index < len(paragraph_boundaries):
+        if paragraph_index >= len(paragraph_boundaries) or (
+            sentence_index < len(sentence_boundaries)
+            and sentence_boundaries[sentence_index] <= paragraph_boundaries[paragraph_index]
+        ):
+            boundary = sentence_boundaries[sentence_index]
+            sentence_index += 1
+        else:
+            boundary = paragraph_boundaries[paragraph_index]
+            paragraph_index += 1
+        if not boundaries or boundaries[-1] != boundary:
+            boundaries.append(boundary)
     segments: list[tuple[str, int, int, tuple[str, ...]]] = []
     start = 0
     for boundary in boundaries + [len(text)]:
@@ -872,19 +894,23 @@ def _analyze(text: str, path: str, content_language: str, source_format: str | N
             marker_sentence[marker] = sentence_index
 
     sentence_by_index = {item.sentence_index: item for item in sentences}
-    citation_cues = [
-        CitationCue(
-            syntax=span.syntax,
-            keys=list(span.keys),
-            line=span.line,
-            sentence_index=marker_sentence.get(span.marker, 1),
-            excerpt=sentence_by_index.get(marker_sentence.get(span.marker, -1)).text if marker_sentence.get(span.marker, -1) in sentence_by_index else "",
+    citation_cues = []
+    for span in citation_spans:
+        sentence_index = marker_sentence.get(span.marker)
+        sentence = sentence_by_index.get(sentence_index) if sentence_index is not None else None
+        citation_cues.append(
+            CitationCue(
+                syntax=span.syntax,
+                keys=list(span.keys),
+                line=span.line,
+                sentence_index=sentence_index,
+                excerpt=sentence.text if sentence else "",
+            )
         )
-        for span in citation_spans
-    ]
     citation_by_sentence: dict[int, list[CitationCue]] = defaultdict(list)
     for cue in citation_cues:
-        citation_by_sentence[cue.sentence_index].append(cue)
+        if cue.sentence_index is not None:
+            citation_by_sentence[cue.sentence_index].append(cue)
     findings = _build_findings(sentences, language, citation_by_sentence)
     token_count = len(_tokens(_CITATION_MARKER_RE.sub(" ", cleaned)))
     note = (

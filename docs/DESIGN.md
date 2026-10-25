@@ -73,14 +73,14 @@ Native disclosure is suitable for optional details such as privacy wording, cita
 Use these project boundaries in the implementation:
 
 ```text
-apps/api/rapport_api/     JSON and shared request validation/security
-apps/web/rapport_web/     Flask views, Jinja templates, CSS, small JS
-packages/core/rapport_auditor/  pure Python analysis/repetition/revision
+apps/api/rapport_api/     Flask factory, HTML/JSON routes, request validation/security
+apps/web/rapport_web/     packaged Jinja templates and static CSS/JavaScript assets
+packages/core/rapport_auditor/  framework-independent analysis/repetition/revision
 tests/                    core, HTTP/security, and browser-facing checks
 docs/                     research, design, API, and security notes
 ```
 
-Keep one application factory and a small, bounded analysis-worker pool. The local profile binds to loopback; the explicit public profile sits behind the prepared HTTPS proxy and uses shared Redis rate-limit metadata. Give JSON endpoints stable error codes and validate content type, byte length, character length, and strict UTF-8 before analysis. HTML form errors should retain entered text and use human language; API errors should remain machine-readable. Keep the core free of Flask imports so its CLI/tests remain usable and so existing `rapport_auditor.*` imports can be preserved during migration.
+Keep one application factory and a small, bounded analysis-worker pool. The local profile binds to loopback; the public Compose profile is only a template and requires an operator-verified HTTPS proxy peer and shared Redis rate-limit metadata. Do not treat checked-in environment examples as live configuration or accept public traffic until the actual proxy, host, capacity, and logging/retention behavior have been verified. Give JSON endpoints stable error codes and validate content type, byte length, character length, and strict UTF-8 before analysis. HTML form errors should retain entered text and use human language; API errors should remain machine-readable. Keep the core free of Flask imports so its CLI/tests remain usable and so existing `rapport_auditor.*` imports can be preserved during migration.
 
 All browser modules should be same-origin and served from the application. No user text should enter logs, analytics, URLs, HTML attributes without escaping, or JavaScript via `innerHTML`. Jinja’s autoescaping should remain enabled; do not mark uploaded text or names safe. Do not return the whole input in the API analysis result unless the caller explicitly needs it. Return excerpts the interface needs, with stable line/sentence references.
 

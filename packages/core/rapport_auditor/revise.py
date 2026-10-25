@@ -348,10 +348,19 @@ def apply_rules_to_line(line: str, *, content_language: str = "en") -> tuple[str
     return updated, [rule.reason_fr if language == "fr" else rule.reason_en for rule in used]
 
 
-def humanize_text(text: str, *, content_language: str = "en") -> tuple[str, list[Edit]]:
+def humanize_text(
+    text: str,
+    *,
+    content_language: str = "en",
+    source_format: str | None = None,
+) -> tuple[str, list[Edit]]:
     language = str(content_language or "en").casefold()
     if language not in RULES_BY_LANGUAGE:
         raise ValueError("content_language must be 'en' or 'fr'")
+    normalized_format = str(source_format or "").casefold().lstrip(".")
+    if normalized_format and normalized_format not in {"txt", "tex"}:
+        raise ValueError("source_format must be 'txt' or 'tex'")
+    protect_latex = normalized_format != "txt"
     lines = text.splitlines(keepends=True)
     stack: list[str] = []
     edits: list[Edit] = []
@@ -360,7 +369,7 @@ def humanize_text(text: str, *, content_language: str = "en") -> tuple[str, list
 
     for index, line in enumerate(lines, start=1):
         before_stack = list(stack)
-        skip = in_skipped_environment(before_stack) or is_latex_command_line(line)
+        skip = protect_latex and (in_skipped_environment(before_stack) or is_latex_command_line(line))
 
         if skip or not line.strip():
             output.append(line)
@@ -368,7 +377,10 @@ def humanize_text(text: str, *, content_language: str = "en") -> tuple[str, list
             ending_match = re.search(r"(?:\r\n|\n|\r)$", line)
             ending = ending_match.group(0) if ending_match else ""
             body = line[:-len(ending)] if ending else line
-            protected_line, protected = _protect_latex_spans(body, inline_state)
+            if protect_latex:
+                protected_line, protected = _protect_latex_spans(body, inline_state)
+            else:
+                protected_line, protected = body, {}
             used: list[Rule] = []
             updated = protected_line
             for rule in RULES_BY_LANGUAGE[language]:
@@ -383,13 +395,14 @@ def humanize_text(text: str, *, content_language: str = "en") -> tuple[str, list
                 edits.append(Edit(index, body, updated, "; ".join(dict.fromkeys(reasons)), ",".join(codes)))
             output.append(updated + ending)
 
-        update_environment_stack(line, stack)
+        if protect_latex:
+            update_environment_stack(line, stack)
 
     return "".join(output), edits
 
 
 def revise_text(text: str, *, content_language: str = "en", source_format: str | None = None) -> tuple[str, list[Edit]]:
-    return humanize_text(text, content_language=content_language)
+    return humanize_text(text, content_language=content_language, source_format=source_format)
 
 
 def format_report(path: str, edits: list[Edit], limit: int) -> str:
@@ -432,12 +445,19 @@ def main() -> int:
         path = pathlib.Path(args.path)
         before = path.read_text(encoding="utf-8")
         display_path = str(path)
+        suffix = path.suffix.casefold().lstrip(".")
+        source_format = suffix if suffix in {"txt", "tex"} else None
     else:
         path = None
         before = sys.stdin.read()
         display_path = "<stdin>"
+        source_format = None
 
-    after, edits = humanize_text(before, content_language=args.content_language)
+    after, edits = humanize_text(
+        before,
+        content_language=args.content_language,
+        source_format=source_format,
+    )
 
     if args.diff:
         if path is None:

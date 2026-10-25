@@ -89,12 +89,12 @@ See [the verification guide](docs/TESTING.md) for browser coverage and limits, s
 ## Project layout and API
 
 ```text
-apps/api/rapport_api/        Flask app factory, JSON API, and Waitress CLI
-apps/web/rapport_web/        Jinja pages, CSS, and progressive-enhancement JavaScript
+apps/api/rapport_api/        Flask factory, HTML/JSON routes, request handling, and Waitress CLI
+apps/web/rapport_web/        packaged Jinja templates, CSS, JavaScript, and static assets
 packages/core/rapport_auditor/  deterministic analysis and revision functions
 tests/                       core, route, security, boundary, and CLI tests
 ```
 
 The JSON API is same-origin and requires a CSRF bootstrap: `GET /api/v1/csrf` returns a token and sets its matching cookie; send both the cookie and `X-CSRF-Token` header on `POST /api/v1/audit` or `/api/v1/revise`. `GET /api/v1/health` is a small health check. Request examples, response fields, error statuses, and size limits are in the [API guide](docs/API.md). The Python app factory is `rapport_api.create_app()`; the command-line entry point starts the local Waitress server.
 
-The standalone Caddy profile is in [`deployment/compose.yaml`](deployment/compose.yaml). A separate Traefik profile targets `rapport.chames.tn` in [`deployment/compose.traefik.yaml`](deployment/compose.traefik.yaml), but neither profile proves a live deployment. See the [production runbook](docs/PRODUCTION.md), [same-VPS co-hosting runbook](docs/COHOSTING.md), and [private Git/deployment guide](docs/GIT_DEPLOYMENT.md) for the required live checks and manual update steps. Confirm the hosting operator, proxy/CDN behavior, and infrastructure retention before inviting public documents.
+The standalone Caddy profile is in [`deployment/compose.yaml`](deployment/compose.yaml). The parameterized Traefik profile is in [`deployment/compose.traefik.yaml`](deployment/compose.traefik.yaml). Its checked-in environment example is specific to the documented co-hosting setup, not generic defaults or live configuration for another host. Supply your own public host and the exact trusted proxy peer from a verified ingress configuration, choose capacity for the target environment, and verify TLS, forwarding-header trust, logging, and retention before accepting real drafts. The Compose profile does not provision or verify the proxy. See the [production runbook](docs/PRODUCTION.md), [same-VPS co-hosting runbook](docs/COHOSTING.md), and [private Git/deployment guide](docs/GIT_DEPLOYMENT.md) for deployment boundaries and checks.
