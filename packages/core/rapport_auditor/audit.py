@@ -188,9 +188,13 @@ def deep_report_to_text(report: DeepAuditReport) -> str:
     lines = [report_to_text(report.base), "", "Visible citation cues:"]
     if report.citation_cues:
         for index, cue in enumerate(report.citation_cues, start=1):
+            location = (
+                f"line {cue.line}, sentence {cue.sentence_index}"
+                if cue.sentence_index is not None
+                else f"line {cue.line}, not associated with a sentence"
+            )
             lines.append(
-                f"  {index}. line {cue.line}, sentence {cue.sentence_index} | "
-                f"{cue.syntax} | labels: {', '.join(cue.keys)}"
+                f"  {index}. {location} | {cue.syntax} | labels: {', '.join(cue.keys)}"
             )
             lines.append(f"     Context: {cue.excerpt}")
     else:

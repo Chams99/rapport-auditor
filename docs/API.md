@@ -85,7 +85,7 @@ Each finding contains a stable `code`, `category`, one-based `sentence_index` an
 - `claim_needs_source`
 - `citation_context_prompt`
 
-Citation cue objects report recognized visible syntax and keys/labels, source line and sentence, and an excerpt. They do not resolve TeX keys or retrieve/check URLs, DOI records, bibliography entries, or source content. The service does not verify whether a cited source exists, is relevant, or supports a statement; it does not determine factuality, plagiarism, or authorship. For measured scope and fixture counts, see [language cue evaluation](EVALUATION.md).
+Citation cue objects report recognized visible syntax and keys/labels, source line and sentence, and an excerpt. `sentence_index` is `null` and `excerpt` is empty when a visible marker cannot be associated with an analyzed sentence; the cue remains available with its source line. They do not resolve TeX keys or retrieve/check URLs, DOI records, bibliography entries, or source content. The service does not verify whether a cited source exists, is relevant, or supports a statement; it does not determine factuality, plagiarism, or authorship. For measured scope and fixture counts, see [language cue evaluation](EVALUATION.md).
 
 When a recognized visible citation immediately follows terminal punctuation, the API associates it with the preceding sentence by proximity. A clear narrative author-date prefix such as `Smith (2024)` or an explicit narrative TeX citation such as `\textcite{smith2024}` or `\citet{smith2024}` remains with the following sentence. This positional association is only a review cue; it does not establish that the source supports the statement.
 
