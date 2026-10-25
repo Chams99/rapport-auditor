@@ -280,7 +280,7 @@
                         <h4 class="visually-hidden">{{ 'Repère de citation, ligne' if is_fr else 'Citation cue, line' }} {{ item.line }}</h4>
                         <div class="finding-meta">
                           <code class="kind-badge kind-code" translate="no">{{ item.syntax }}</code>
-                          <span class="line-reference" data-line="{{ item.line }}">{{ 'Ligne' if is_fr else 'Line' }} {{ item.line }} · {{ 'phrase' if is_fr else 'sentence' }} {{ item.sentence_index }}</span>
+                          <span class="line-reference" data-line="{{ item.line }}">{{ 'Ligne' if is_fr else 'Line' }} {{ item.line }}{% if item.sentence_index is not none %} · {{ 'phrase' if is_fr else 'sentence' }} {{ item.sentence_index }}{% else %} · {{ 'citation isolée' if is_fr else 'unattached citation' }}{% endif %}</span>
                         </div>
                         {% if item.excerpt %}<blockquote class="excerpt" lang="{{ selected_content_language }}">{{ item.excerpt }}</blockquote>{% endif %}
                         {% if item['keys'] %}<ul class="fact-list"><li><span class="fact-label">{{ 'Référence visible' if is_fr else 'Visible reference' }}</span> <code lang="{{ selected_content_language }}">{{ item['keys']|join(', ') }}</code></li></ul>{% endif %}

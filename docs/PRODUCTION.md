@@ -4,7 +4,7 @@ This runbook describes the standalone Caddy topology; it does not describe the s
 
 The app is a public document-processing service when hosted: browser text and uploads travel to the service server over HTTPS and are processed there. The application is designed not to retain source text, but that does not control host memory, crash dumps, provider backups, proxy/server logs, or infrastructure telemetry. Before soliciting non-synthetic reports, the privacy notice must name the selected hosting arrangement and explain its verified retention practices.
 
-The topology, proxy settings, and Caddy-specific acceptance steps below apply to the standalone `deployment/compose.yaml`. The optional shared-host profile is `deployment/compose.traefik.yaml`; its separate network, proxy-trust, host-capacity, and live Traefik checks are documented in `docs/COHOSTING.md`.
+The topology, proxy settings, and Caddy-specific acceptance steps below apply to the standalone `deployment/compose.yaml`. The optional shared-host profile is `deployment/compose.traefik.yaml`; its separate network, proxy-trust, host-capacity, and live Traefik checks are documented in `docs/COHOSTING.md`. The checked-in `.env.traefik.example` is specific to the documented co-hosting setup, not a generic default or live configuration for another host. Set your own public domain and the exact trusted proxy peer from the verified ingress configuration, then render and review the actual Compose configuration before use. This profile does not create, secure, or verify the ingress proxy.
 
 ## Intended trust boundaries
 
