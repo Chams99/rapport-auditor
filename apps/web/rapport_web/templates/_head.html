@@ -4,9 +4,19 @@
     <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#15141d" media="(prefers-color-scheme: dark)">
     <meta name="description" content="{{ 'Des pistes bilingues de relecture pour le travail académique.' if is_fr else 'Bilingual editing prompts for academic writing.' }}">
-    <link rel="alternate" hreflang="en" href="{{ page_path }}?locale=en">
-    <link rel="alternate" hreflang="fr" href="{{ page_path }}?locale=fr">
-    <link rel="alternate" hreflang="x-default" href="{{ page_path }}">
+    {% set site_root = request.url_root.rstrip('/') %}
+    <link rel="alternate" hreflang="en" href="{{ site_root }}{{ page_path }}?locale=en">
+    <link rel="alternate" hreflang="fr" href="{{ site_root }}{{ page_path }}?locale=fr">
+    <link rel="alternate" hreflang="x-default" href="{{ site_root }}{{ page_path }}">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Rapport Auditor">
+    <meta property="og:title" content="Rapport Auditor — {{ 'Atelier de révision' if is_fr else 'Writing review desk' }}">
+    <meta property="og:description" content="{{ 'Des pistes bilingues de relecture pour le travail académique.' if is_fr else 'Bilingual editing prompts for academic writing.' }}">
+    <meta property="og:url" content="{{ site_root }}{{ page_path }}">
+    <meta property="og:image" content="{{ site_root }}{{ url_for('static', filename='og-image.jpg') }}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <link rel="icon" href="/favicon.ico" sizes="32x32">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
