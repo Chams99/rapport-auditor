@@ -2064,6 +2064,63 @@ button.type-row[aria-pressed="true"] {
   text-align: right;
 }
 
+/* Who built the app, under the footer line. */
+.made-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  padding-block: var(--space-2) var(--space-8);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.made-by h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.made-by p {
+  margin: 2px 0 0;
+}
+
+.made-by p a {
+  color: var(--text);
+  text-decoration-color: var(--border-control);
+  text-underline-offset: 3px;
+}
+
+.made-by ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.made-by li a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+
+.made-by li a:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
 /* ------------------------------------------------------------- Motion */
 
 /* Short, purposeful motion: content settles in, state changes are visible.
@@ -2679,7 +2736,8 @@ button.type-row[aria-pressed="true"] {
     padding: var(--space-1) var(--space-2) var(--space-4) var(--space-1);
   }
 
-  .page-workspace .page-footer {
+  .page-workspace .page-footer,
+  .page-workspace .made-by {
     display: none;
   }
 }
@@ -2780,6 +2838,10 @@ button.type-row[aria-pressed="true"] {
 }
 
 @media print {
+  .made-by {
+    display: none;
+  }
+
   :root {
     color-scheme: light;
   }

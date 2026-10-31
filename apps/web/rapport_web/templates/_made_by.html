@@ -1,0 +1,14 @@
+{# Who built Rapport Auditor, and how to reach him. Matches the Person entity published on https://chames.tn. #}
+{% set made_by_portfolio = 'https://chames.tn/' ~ ('fr/' if is_fr else '') ~ '?utm_source=rapport-auditor&utm_medium=referral&utm_campaign=demo_credit' %}
+{% set made_by_message = 'Bonjour Chames, j’ai vu Rapport Auditor et j’aimerais parler d’un projet.' if is_fr else 'Hi Chames, I saw Rapport Auditor and would like to talk about a project.' %}
+<aside class="made-by" aria-labelledby="made-by-title">
+  <div>
+    <h2 id="made-by-title">{{ 'Besoin d’un outil comme celui-ci ?' if is_fr else 'Need a tool like this one?' }}</h2>
+    <p>{{ 'Conçu et développé par' if is_fr else 'Designed and built by' }} <a href="{{ made_by_portfolio }}" rel="author">Chames Eddine Dhibi</a>, {{ 'développeur full-stack freelance' if is_fr else 'freelance full-stack developer' }}.</p>
+  </div>
+  <ul>
+    <li><a href="tel:+21651091800">+216 51 091 800</a></li>
+    <li><a href="https://wa.me/21651091800?text={{ made_by_message|urlencode }}">WhatsApp</a></li>
+    <li><a href="{{ made_by_portfolio }}">chames.tn</a></li>
+  </ul>
+</aside>

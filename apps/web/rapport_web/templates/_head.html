@@ -17,6 +17,36 @@
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="author" content="Chames Eddine Dhibi">
+    <link rel="author" href="https://chames.tn/">
+    {% set structured_data = {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "@id": site_root ~ "/#app",
+          "name": "Rapport Auditor",
+          "url": site_root ~ "/",
+          "description": "Des pistes bilingues de relecture pour le travail académique." if is_fr else "Bilingual editing prompts for academic writing.",
+          "applicationCategory": "EducationalApplication",
+          "operatingSystem": "Any",
+          "inLanguage": ["en", "fr"],
+          "creator": {"@id": "https://chames.tn/#person"}
+        },
+        {
+          "@type": "Person",
+          "@id": "https://chames.tn/#person",
+          "name": "Chames Eddine Dhibi",
+          "alternateName": ["Chames Dhibi", "Chams Dhibi"],
+          "jobTitle": "Software Engineer & Full-Stack Developer",
+          "url": "https://chames.tn",
+          "telephone": "+216 51091800",
+          "address": {"@type": "PostalAddress", "addressLocality": "Gafsa", "addressCountry": "TN"},
+          "sameAs": ["https://github.com/chams99", "https://linkedin.com/in/chamesdh", "https://www.upwork.com/freelancers/~01ec2dc27e0c617399"]
+        }
+      ]
+    } %}
+    <script type="application/ld+json">{{ structured_data|tojson }}</script>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <link rel="icon" href="/favicon.ico" sizes="32x32">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
