@@ -37,7 +37,7 @@ If the clone says permission denied, stop and use an existing authorized account
 Run this from the reviewed clean checkout on Windows after its initial commit is approved. The authenticated GitHub account should be `Chams99`; the login command prints only the account name. Stop if the working tree is dirty, the account differs, or any remote already exists.
 
 ```powershell
-Set-Location 'D:\1_DEV\1_A1_UNIVERSITY\0_PFE\rapport-auditor'
+Set-Location '<path to your rapport-auditor clone>'
 git status --short
 git remote
 gh api user --jq .login

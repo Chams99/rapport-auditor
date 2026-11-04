@@ -87,12 +87,8 @@ Use component guidance as a reference and implement a small purpose-built layer.
 - [Radix Primitives](https://www.radix-ui.com/primitives/docs/overview/introduction) are React components. [shadcn/ui’s Astro setup](https://ui.shadcn.com/docs/installation/astro) configures Tailwind and React; the repository has neither and needs no complex widget, so adopting this path would create a second runtime without meaningful benefit.
 - [Flowbite](https://flowbite.com/docs/getting-started/quickstart/) works with Tailwind and vanilla JavaScript, but still brings a library, utility-CSS setup, and initialization lifecycle for interactions the native controls already provide. It is not recommended for this interface.
 
-## Suggested agent skills and research resources
+## Review references
 
-Skills are optional development-time guidance, not app dependencies. The older note naming `security-best-practices`, `security-threat-model`, `playwright`, and `playwright-interactive` as active environment skills was historical and should not be treated as a current availability claim. For this 2026-10-07 research pass, the available `web-design-guidelines` skill was read and its current checklist fetched. The linked skill repositories below are optional references; do not install tools or add application dependencies just to follow them.
-
-- Use [OpenAI `security-best-practices`](https://github.com/openai/skills/tree/main/skills/.curated/security-best-practices) for framework-aware review of the Python/Flask boundary and [OpenAI `security-threat-model`](https://github.com/openai/skills/tree/main/skills/.curated/security-threat-model) to record repository-specific assets, entry points, trust boundaries, and mitigations. These are security tasks rather than generic style review.
-- Use [OpenAI `playwright`](https://github.com/openai/skills/tree/main/skills/.curated/playwright) for repeatable terminal-driven browser QA and [OpenAI `playwright-interactive`](https://github.com/openai/skills/tree/main/skills/.curated/playwright-interactive) for persistent visual/interaction debugging when that tool is available. The former’s current workflow is CLI-oriented; the latter depends on an enabled persistent JavaScript REPL. Keep test code and dependencies in the repository only when the project needs them.
 - For visual review use the first-party [GOV.UK Design System](https://design-system.service.gov.uk/components/) and [USWDS](https://designsystem.digital.gov/components/) pages above. For normative requirements use the [WCAG 2.2 Recommendation](https://www.w3.org/TR/WCAG22/), not a design-system example alone.
 
 ## Source and method limits
