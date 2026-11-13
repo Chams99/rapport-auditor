@@ -375,7 +375,7 @@ def test_empty_input_returns_friendly_error_and_preserves_form_state(client):
     response = post_form(client, "/audit", {"text": pasted})
 
     assert response.status_code == 400
-    assert b"Paste text or upload a .tex or .txt file." in response.data
+    assert b"Paste text or upload a .docx, .tex, or .txt file." in response.data
     assert b'id="report-text"' in response.data
     probe = _WebMarkupProbe()
     probe.feed(response.get_data(as_text=True))

@@ -16,6 +16,8 @@ from collections import Counter
 from dataclasses import asdict
 from typing import List
 
+from .document import InvalidDocxError, read_docx_file
+
 
 PDF_WORD_BREAK_REPAIRS = {
     "com prising": "comprising", "com prise": "comprise", "com prises": "comprises",
@@ -208,7 +210,7 @@ def deep_report_to_text(report: DeepAuditReport) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Review bilingual writing patterns and visible citation cues.")
-    parser.add_argument("path", nargs="?", help="A UTF-8 text or LaTeX file. Reads standard input if omitted.")
+    parser.add_argument("path", nargs="?", help="A UTF-8 text, LaTeX, or Word .docx file. Reads standard input if omitted.")
     parser.add_argument("--json", action="store_true", help="Emit the structured review as JSON.")
     parser.add_argument("--deep", action="store_true", help="Include citation cues with source-line references.")
     parser.add_argument("--content-language", choices=("en", "fr"), default="en", help="Language of the document (default: en).")
@@ -216,9 +218,16 @@ def main() -> int:
     args = parser.parse_args()
     if args.path:
         file_path = pathlib.Path(args.path)
-        text = file_path.read_text(encoding="utf-8")
-        path = str(file_path)
         source_format = file_path.suffix.casefold().lstrip(".")
+        if source_format == "docx":
+            try:
+                text = read_docx_file(file_path)
+            except InvalidDocxError as exc:
+                parser.error(f"cannot read .docx document: {exc}")
+            source_format = "txt"
+        else:
+            text = file_path.read_text(encoding="utf-8")
+        path = str(file_path)
     else:
         text = sys.stdin.read()
         path = "<stdin>"

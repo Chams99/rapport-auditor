@@ -22,6 +22,10 @@ _MAX_DIFF_CHARS = 150_000
 _MAX_CLEANED_PREVIEW_CHARS = 10_000
 
 
+def _core_source_format(source_format: str) -> str:
+    return "txt" if source_format == "docx" else source_format
+
+
 class WorkerCapacityError(RuntimeError):
     pass
 
@@ -221,16 +225,17 @@ def _worker_entry(
             result = True
         elif operation == "audit":
             text, source_name, source_format, content_language = values
+            core_format = _core_source_format(source_format)
             report = audit_text_deep(
                 text,
                 source_name,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=core_format,
             )
             repetition = analyze_repetition(
                 text,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=core_format,
             )
             cleaned = strip_pdf_artifacts(text)
             if source_format == "tex":
@@ -241,7 +246,7 @@ def _worker_entry(
             revised, edits = revise_text(
                 text,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=_core_source_format(source_format),
             )
             result = revised, edits, _revision_diff(source_name, text, revised)
         else:  # pragma: no cover - operation names are internal constants
@@ -496,16 +501,17 @@ class LocalAnalysisRunner:
 
         if operation == "audit":
             text, source_name, source_format, content_language = values
+            core_format = _core_source_format(source_format)
             report = audit_text_deep(
                 text,
                 source_name,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=core_format,
             )
             repetition = analyze_repetition(
                 text,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=core_format,
             )
             cleaned = strip_pdf_artifacts(text)
             if source_format == "tex":
@@ -516,7 +522,7 @@ class LocalAnalysisRunner:
             revised, edits = revise_text(
                 text,
                 content_language=content_language,
-                source_format=source_format,
+                source_format=_core_source_format(source_format),
             )
             return revised, edits, _revision_diff(source_name, text, revised)
         raise ValueError("unknown analysis operation")

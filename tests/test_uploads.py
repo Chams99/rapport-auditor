@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import tempfile
+import zipfile
 
 import pytest
 from flask import request
@@ -24,6 +25,21 @@ def _upload(client, *, filename: str, content: bytes, mimetype: str, text: str =
         content_type="multipart/form-data",
         base_url=LOCAL_ORIGIN,
     )
+
+
+def _docx_with_text(text: str) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+        )
+        archive.writestr(
+            "word/document.xml",
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>",
+        )
+    return output.getvalue()
 
 
 @pytest.mark.parametrize(
@@ -157,6 +173,35 @@ def test_tex_upload_with_citation_renders_visible_key_and_context(client):
     assert response.status_code == 200, response.get_data(as_text=True)
     assert b"synthetic-grouping-2026" in response.data
     assert b"Check that the cited work supports this specific statement" in response.data
+
+
+def test_docx_upload_audits_body_and_identifies_extraction_scope(client):
+    response = _upload(
+        client,
+        filename="chapter.docx",
+        content=_docx_with_text("This chapter presents a fictional method."),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert b"chapter.docx" in response.data
+    assert b"DOCX" in response.data
+    assert b"Equations, images, headers, footers, notes, and formatting are not preserved." in response.data
+
+
+def test_docx_revision_uses_plain_text_pipeline_and_names_output_format(client):
+    response = _upload(
+        client,
+        filename="chapter.docx",
+        content=_docx_with_text("This chapter presents a fictional method."),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        path="/revise",
+    )
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert b"This chapter describes a fictional method." in response.data
+    assert b'data-source-format="docx"' in response.data
+    assert b"downloaded revision is a plain .txt file" in response.data
 
 
 def test_html_escapes_user_text(client):

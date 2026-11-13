@@ -7,6 +7,7 @@
 {% set text_error = field_errors.get('text') or field_errors.get('input') %}
 {% set file_error = field_errors.get('file') %}
 {% set is_tex = source_format|default('txt') in ['tex', '.tex'] %}
+{% set is_docx = source_format|default('txt') in ['docx', '.docx'] %}
 {% set sample_text_en = 'This chapter presents a fictional method. This chapter presents a fictional result. This chapter presents a fictional discussion. The results show a made-up increase in this synthetic example.' %}
 {% set sample_text_fr = 'Ce chapitre présente une méthode fictive. Ce chapitre présente un résultat fictif. Ce chapitre présente une discussion fictive. Les résultats montrent une hausse inventée dans cet exemple synthétique.' %}
 {% set max_input_chars = limits.max_input_chars|default(250000) %}
@@ -78,19 +79,19 @@
                 <div class="toolbar-field">
                   <label class="toolbar-label" for="source-format">{{ 'Format du texte collé' if is_fr else 'Pasted text format' }}</label>
                   <select id="source-format" name="source_format" aria-describedby="format-help">
-                    <option value="txt" {% if not is_tex %}selected{% endif %}>{{ 'Texte brut (.txt)' if is_fr else 'Plain text (.txt)' }}</option>
+                    <option value="txt" {% if not is_tex and not is_docx %}selected{% endif %}>{{ 'Texte brut (.txt)' if is_fr else 'Plain text (.txt)' }}</option>
                     <option value="tex" {% if is_tex %}selected{% endif %}>LaTeX (.tex)</option>
                   </select>
                 </div>
                 <div class="toolbar-field toolbar-upload">
                   <label class="toolbar-label" for="report-file">{{ 'Ou un fichier' if is_fr else 'Or a file' }}</label>
                   <label class="button button-secondary upload-button" for="report-file"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>{{ 'Importer' if is_fr else 'Upload' }}</label>
-                  <input class="file-input" id="report-file" name="file" type="file" accept=".txt,.tex,text/plain" aria-label="{{ 'Importer un fichier texte' if is_fr else 'Upload a text file' }}" aria-invalid="{{ 'true' if file_error else 'false' }}" aria-describedby="file-help file-policy file-error">
+                  <input class="file-input" id="report-file" name="file" type="file" accept=".txt,.tex,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-label="{{ 'Importer un fichier texte ou Word' if is_fr else 'Upload a text or Word file' }}" aria-invalid="{{ 'true' if file_error else 'false' }}" aria-describedby="file-help file-policy file-error">
                 </div>
               </div>
               <p id="language-help" class="visually-hidden">{{ 'Choisit les règles, indépendamment de l’interface.' if is_fr else 'Selects the rules; independent of the interface.' }}</p>
               <p id="format-help" class="visually-hidden">{{ 'Détecté automatiquement pour un fichier.' if is_fr else 'Detected automatically for files.' }}</p>
-              <p id="file-help" class="visually-hidden">{{ 'Fichier texte UTF-8 .txt ou .tex, taille maximale :' if is_fr else 'UTF-8 .txt or .tex text file, maximum size:' }} {{ (max_upload_bytes / 1000000)|round(1) }} {{ 'Mo' if is_fr else 'MB' }}</p>
+              <p id="file-help" class="visually-hidden">{{ 'Fichier .txt/.tex UTF-8 ou Word .docx, taille maximale :' if is_fr else 'UTF-8 .txt/.tex or Word .docx file, maximum size:' }} {{ (max_upload_bytes / 1000000)|round(1) }} {{ 'Mo' if is_fr else 'MB' }}</p>
               <p id="file-policy" class="field-help">{{ 'Le fichier choisi est prioritaire sur le texte collé.' if is_fr else 'A selected file takes precedence over pasted text.' }}</p>
               <noscript><p class="field-help">{{ 'Pour revenir au texte collé, rechargez la page puis collez à nouveau votre brouillon.' if is_fr else 'To switch back to pasted text, reload the page and paste your draft again.' }}</p></noscript>
 
@@ -112,7 +113,7 @@
                 </details>
                 <div class="textarea-wrap" data-dropzone>
                   <textarea id="report-text" name="text" rows="13" lang="{{ selected_content_language }}" autocomplete="off" spellcheck="true" aria-invalid="{{ 'true' if text_error else 'false' }}" aria-describedby="text-help text-error" placeholder="{{ 'Collez ici un chapitre, un résumé ou une section…' if is_fr else 'Paste a chapter, abstract or report section…' }}">{{ text|default('', true) }}</textarea>
-                  <div class="drop-overlay" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg>{{ 'Déposez votre fichier .txt ou .tex' if is_fr else 'Drop your .txt or .tex file' }}</div>
+                  <div class="drop-overlay" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg>{{ 'Déposez votre fichier .txt, .tex ou .docx' if is_fr else 'Drop your .txt, .tex, or .docx file' }}</div>
                   <div class="textarea-footer">
                     <div class="editor-tools">
                       <button class="text-button" id="load-example" type="button" data-sample-en="{{ sample_text_en }}" data-sample-fr="{{ sample_text_fr }}" hidden>
@@ -186,7 +187,7 @@
               <article class="panel summary-card">
                 <div class="summary-row">
                   <div class="source-identity">
-                    <span class="file-type-icon" aria-hidden="true">{{ 'TEX' if is_tex else 'TXT' }}</span>
+                    <span class="file-type-icon" aria-hidden="true">{{ 'DOCX' if is_docx else 'TEX' if is_tex else 'TXT' }}</span>
                     <div class="source-copy">
                       <p class="meta-label">{{ 'Source relue' if is_fr else 'Source reviewed' }} · {{ 'Document en français' if selected_content_language == 'fr' and is_fr else 'French document' if selected_content_language == 'fr' else 'Document en anglais' if is_fr else 'English document' }}</p>
                       <h3 class="source-name" data-source-name="{{ source_name_value }}" title="{{ display_source_name }}">{{ display_source_name }}</h3>
@@ -198,6 +199,7 @@
                     <div class="document-stat"><dt class="stat-label">{{ 'Pistes' if is_fr else 'Prompts' }}</dt><dd class="stat-value"><data value="{{ findings_total }}" data-number>{{ findings_total }}</data></dd></div>
                   </dl>
                 </div>
+                {% if is_docx %}<p class="section-note">{{ 'Texte extrait des paragraphes et tableaux du corps. Les équations, images, en-têtes, pieds de page, notes et mise en forme ne sont pas conservés.' if is_fr else 'Text extracted from body paragraphs and tables. Equations, images, headers, footers, notes, and formatting are not preserved.' }}</p>{% endif %}
                 <p class="summary-caveat"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>{{ 'Les indications reposent sur des motifs visibles. Le service ne vérifie ni les faits, ni les références bibliographiques, ni le contenu des sources.' if is_fr else 'Prompts are based on visible patterns. The service does not check factual claims, bibliography entries or source contents.' }}</span></p>
                 {% if report.base.sentence_count < 4 %}
                   <p class="summary-caveat short-sample-note">{{ 'Échantillon court : les résultats peuvent être limités ; un texte plus long peut révéler d’autres motifs.' if is_fr else 'Short sample: results may be limited; longer text may reveal additional patterns.' }}</p>
@@ -311,7 +313,7 @@
               <article class="panel summary-card">
                 <div class="summary-source-row">
                   <div class="source-identity">
-                    <span class="file-type-icon" aria-hidden="true">{{ 'TEX' if is_tex else 'TXT' }}</span>
+                    <span class="file-type-icon" aria-hidden="true">{{ 'DOCX' if is_docx else 'TEX' if is_tex else 'TXT' }}</span>
                     <div class="source-copy">
                       <p class="meta-label">{{ 'Aperçu seulement' if is_fr else 'Preview only' }}</p>
                   <h3 class="source-name" data-source-name="{{ source_name_value }}" title="{{ display_source_name }}">{{ display_source_name }}</h3>
@@ -319,6 +321,8 @@
                   </div>
                   <span class="tag">{{ edits|length }} {{ 'retouches proposées' if is_fr else 'suggested edits' }}</span>
                 </div>
+                {% if is_docx %}<p class="section-note">{{ 'Texte extrait des paragraphes et tableaux du corps. Les équations, images, en-têtes, pieds de page, notes et mise en forme ne sont pas conservés.' if is_fr else 'Text extracted from body paragraphs and tables. Equations, images, headers, footers, notes, and formatting are not preserved.' }}</p>{% endif %}
+                {% if is_docx %}<p class="section-note">{{ 'La révision téléchargée est un fichier .txt et ne conserve pas la mise en forme Word.' if is_fr else 'The downloaded revision is a plain .txt file and does not preserve Word formatting.' }}</p>{% endif %}
                 <div class="callout">
                   <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>
                   <p>{{ 'Rien n’est écrit dans votre fichier. Relisez les changements avant de reprendre le texte.' if is_fr else 'Nothing is written to your file. Review each change before you use the revised text.' }}</p>

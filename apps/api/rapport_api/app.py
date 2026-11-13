@@ -66,10 +66,11 @@ _ERROR_MESSAGES = {
         "input_too_large": "The text is over the input size limit.",
         "upload_too_large": "The uploaded file is over the file size limit.",
         "too_many_lines": "The input has too many lines to review safely.",
-        "empty_text": "Paste text or upload a .tex or .txt file.",
+        "empty_text": "Paste text or upload a .docx, .tex, or .txt file.",
         "invalid_source_format": "Choose plain text (.txt) or LaTeX (.tex).",
-        "unsupported_file_type": "Please upload a .tex or .txt file.",
-        "mismatched_file_type": "The file type does not match its .tex or .txt extension.",
+        "unsupported_file_type": "Please upload a .docx, .tex, or .txt file.",
+        "mismatched_file_type": "The file type does not match its .docx, .tex, or .txt extension.",
+        "invalid_docx": "This Word file could not be read. Upload a valid .docx document.",
         "binary_file": "Upload a UTF-8 text file, not a binary document.",
         "invalid_form": "The form fields could not be read.",
         "csrf_failed": "This form expired or could not be verified. Reload the page and try again.",
@@ -98,10 +99,11 @@ _ERROR_MESSAGES = {
         "input_too_large": "Le texte dépasse la limite de taille.",
         "upload_too_large": "Le fichier dépasse la limite de taille.",
         "too_many_lines": "Le texte contient trop de lignes pour être analysé en toute sécurité.",
-        "empty_text": "Collez du texte ou importez un fichier .tex ou .txt.",
+        "empty_text": "Collez du texte ou importez un fichier .docx, .tex ou .txt.",
         "invalid_source_format": "Choisissez du texte brut (.txt) ou du LaTeX (.tex).",
-        "unsupported_file_type": "Importez un fichier .tex ou .txt.",
-        "mismatched_file_type": "Le type de fichier ne correspond pas à son extension .tex ou .txt.",
+        "unsupported_file_type": "Importez un fichier .docx, .tex ou .txt.",
+        "mismatched_file_type": "Le type de fichier ne correspond pas à son extension .docx, .tex ou .txt.",
+        "invalid_docx": "Ce document Word est illisible. Importez un fichier .docx valide.",
         "binary_file": "Importez un fichier texte UTF-8, et non un document binaire.",
         "invalid_form": "Les champs du formulaire sont illisibles.",
         "csrf_failed": "Ce formulaire a expiré ou n’a pas pu être vérifié. Rechargez la page puis réessayez.",
@@ -611,7 +613,7 @@ def _read_html_input(app: Flask) -> AuditInput:
         safe_name = sanitize_filename(filename if isinstance(filename, str) else "")
         g.form_state["source_name"] = safe_name
         file_format = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
-        if file_format in {"txt", "tex"}:
+        if file_format in {"txt", "tex", "docx"}:
             g.form_state["source_format"] = file_format
         data = uploaded.stream.read(int(app.config["MAX_UPLOAD_BYTES"]) + 1)
         decoded = decode_uploaded_text(
