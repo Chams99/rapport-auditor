@@ -72,6 +72,7 @@
   const textField = document.getElementById("report-text");
   const contentLanguageField = document.getElementById("content-language");
   const fileField = document.getElementById("report-file");
+  const supportedUploadFileName = /\.(?:txt|tex|docx)$/i;
   const formatField = document.getElementById("source-format");
   const countLabel = document.getElementById("character-count");
   const clearButton = document.getElementById("clear-text");
@@ -279,7 +280,7 @@
       }
       if (!preserveErrors) setFieldError(fileField, fileError, "");
 
-      if (file && !/\.(?:txt|tex|docx)$/i.test(file.name)) {
+      if (file && !supportedUploadFileName.test(file.name)) {
         setFieldError(fileField, fileError, messages.fileType);
       } else if (file && file.size > maxFileBytes) {
         setFieldError(fileField, fileError, messages.fileSize);
@@ -796,7 +797,7 @@
 
       clearErrors();
       const file = selectedFile();
-      const unsupportedFile = file && !/\.(?:txt|tex)$/i.test(file.name);
+      const unsupportedFile = file && !supportedUploadFileName.test(file.name);
       const oversizedFile = file && file.size > maxFileBytes;
 
       if (!file && !textField.value.trim()) {

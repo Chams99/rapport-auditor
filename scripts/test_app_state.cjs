@@ -565,6 +565,28 @@ function testFileEnhancementAndUndo() {
   assert.equal(ui.text.value, "Synthetic example.");
 }
 
+async function testDocxUploadSubmitsToBothActions() {
+  for (const [path, button] of [["audit", "auditButton"], ["revise", "reviseButton"]]) {
+    const ui = boot({
+      enhanced: true,
+      fetchHandler: async (url) => fakeHtmlResponse({ url }),
+    });
+    const submitter = ui[button];
+    submitter.formAction = `/${path}`;
+    ui.setResponsePage({ mode: path });
+    ui.file.files = [{ name: "chapter.docx", size: 480 }];
+    ui.file.dispatch("change");
+
+    const submitted = ui.form.dispatch("submit", { submitter });
+    assert.equal(submitted.prevented, true, `${path} DOCX upload uses enhanced submission`);
+    assert.equal(ui.fileError.hidden, true, `${path} DOCX upload passes extension validation`);
+    assert.equal(ui.fetchCalls.length, 1, `${path} DOCX upload reaches the request handler`);
+    assert.equal(ui.fetchCalls[0].url, `https://rapport.test/${path}`);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ui.document.body.dataset.enhancedResult, "true", `${path} DOCX response is adopted`);
+  }
+}
+
 function testOptionalHooksSubmissionAndBfcache() {
   const ui = boot({ locale: "fr", optionalFormHelpers: false, fileControls: false });
   assert.equal(ui.documentElement.classList.contains("js-ready"), false, "partial picker hooks must retain the native file input");
@@ -906,6 +928,7 @@ async function testStaleRequestCannotResetNewSubmission() {
 
 async function run() {
   testFileEnhancementAndUndo();
+  await testDocxUploadSubmitsToBothActions();
   testOptionalHooksSubmissionAndBfcache();
   testServerRenderedDraftIsCleanUntilEdited();
   testOriginalSourceNamesDriveDownloadNames();
