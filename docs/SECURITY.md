@@ -16,7 +16,7 @@ These controls describe application behavior. They do not make a browser, host o
 
 The local CLI binds to `127.0.0.1` by default and creates a random signing secret when none is configured. It uses a bounded in-memory, per-process rolling-window limiter; restart clears this local throttle. Do not change `RAPPORT_AUDITOR_HOST` from loopback unless the server profile and the entire exposure boundary have been deliberately configured. The unauthenticated local app is not intended for a shared network.
 
-The local request parser accepts UTF-8 `.txt` and `.tex` only. It rejects invalid encodings, binary signatures, NUL and unsupported control characters, mismatched extensions/MIME types, and requests exceeding configured character, byte, line, upload, or whole-body limits. Oversized input is rejected, not silently truncated.
+The local request parser accepts UTF-8 `.txt` / `.tex` and `.docx` Word files. DOCX extraction reads only the main body paragraphs and table cells as plain text, with bounded ZIP entry count, compressed upload size, and streamed `word/document.xml` size; DTD and entity declarations are rejected before XML tree parsing. Equations, images, headers, footers, comments, footnotes, and Word formatting are not extracted. The parser rejects invalid text encodings, binary signatures, NUL and unsupported control characters, mismatched extensions/MIME types, and requests exceeding configured character, byte, line, upload, or whole-body limits. Oversized input is rejected, not silently truncated.
 
 ## Public server profile
 

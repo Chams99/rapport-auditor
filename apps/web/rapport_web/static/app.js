@@ -95,7 +95,7 @@
   const messages = {
     empty: isFr ? "Ajoutez du texte ou choisissez un fichier avant de continuer." : "Add some text or choose a file before continuing.",
     textSize: isFr ? `Le texte dépasse la limite de ${numberFormat.format(maxChars)} caractères. Divisez-le en sections et réessayez.` : `Text exceeds the ${numberFormat.format(maxChars)}-character limit. Split it into sections and try again.`,
-    fileType: isFr ? "Choisissez un fichier .txt ou .tex encodé en UTF-8." : "Choose a UTF-8 .txt or .tex file.",
+    fileType: isFr ? "Choisissez un fichier .txt, .tex ou .docx." : "Choose a .txt, .tex, or .docx file.",
     fileSize: isFr ? `Ce fichier dépasse la limite de ${fileSizeFormat.format(maxFileBytes / 1000000)} Mo.` : `This file is larger than the ${fileSizeFormat.format(maxFileBytes / 1000000)} MB limit.`,
     loadedExample: isFr ? "Exemple chargé. Vous pouvez le modifier avant la revue." : "Example loaded. Edit it before starting your review.",
     fileRemoved: isFr ? "Fichier retiré." : "File removed.",
@@ -279,7 +279,7 @@
       }
       if (!preserveErrors) setFieldError(fileField, fileError, "");
 
-      if (file && !/\.(?:txt|tex)$/i.test(file.name)) {
+      if (file && !/\.(?:txt|tex|docx)$/i.test(file.name)) {
         setFieldError(fileField, fileError, messages.fileType);
       } else if (file && file.size > maxFileBytes) {
         setFieldError(fileField, fileError, messages.fileSize);
@@ -1314,7 +1314,7 @@
   const baseName = sourceTitle
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
     .replace(/\.+$/g, "")
-    .replace(/\.(?:txt|tex)$/i, "")
+    .replace(/\.(?:txt|tex|docx)$/i, "")
     .trim() || "rapport";
 
   downloadButtons.forEach((button) => {
@@ -1323,7 +1323,8 @@
     button.hidden = false;
     button.addEventListener("click", () => {
       const kind = button.dataset.download;
-      const extension = kind === "cleaned" ? "txt" : (button.dataset.sourceFormat || "txt").replace(/^\./, "");
+      const sourceFormat = (button.dataset.sourceFormat || "txt").replace(/^\./, "");
+      const extension = kind === "cleaned" || sourceFormat === "docx" ? "txt" : sourceFormat;
       const filename = kind === "cleaned" ? `${baseName}_cleaned.txt` : `${baseName}_revision_preview.${extension}`;
       const blob = new Blob([source.value], { type: "text/plain;charset=utf-8" });
       const url = createPageObjectUrl(blob);

@@ -19,6 +19,8 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
+from .document import InvalidDocxError, read_docx_file
+
 
 SKIP_ENVIRONMENTS = {
     "equation",
@@ -434,7 +436,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Preview a small set of bilingual, meaning-aware prose edits while preserving LaTeX."
     )
-    parser.add_argument("path", nargs="?", help="Text or .tex file. Reads stdin if omitted.")
+    parser.add_argument("path", nargs="?", help="Text, .tex, or .docx file. Reads stdin if omitted.")
     parser.add_argument("--write", action="store_true", help="Overwrite the input file with the revised text.")
     parser.add_argument("--diff", action="store_true", help="Print a unified diff.")
     parser.add_argument("--report-limit", type=int, default=20, help="Maximum changed lines to show in the report.")
@@ -443,10 +445,19 @@ def main() -> int:
 
     if args.path:
         path = pathlib.Path(args.path)
-        before = path.read_text(encoding="utf-8")
-        display_path = str(path)
         suffix = path.suffix.casefold().lstrip(".")
-        source_format = suffix if suffix in {"txt", "tex"} else None
+        if suffix == "docx" and args.write:
+            parser.error("--write cannot overwrite a .docx file; save the plain-text output separately.")
+        if suffix == "docx":
+            try:
+                before = read_docx_file(path)
+            except InvalidDocxError as exc:
+                parser.error(f"cannot read .docx document: {exc}")
+            source_format = "txt"
+        else:
+            before = path.read_text(encoding="utf-8")
+            source_format = suffix if suffix in {"txt", "tex"} else None
+        display_path = str(path)
     else:
         path = None
         before = sys.stdin.read()

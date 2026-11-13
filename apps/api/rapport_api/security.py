@@ -14,6 +14,7 @@ from typing import Iterable
 from urllib.parse import urlsplit
 
 from flask import Request
+from rapport_auditor.document import InvalidDocxError, extract_docx_text
 
 
 class BoundedMemoryRequest(Request):
@@ -60,6 +61,7 @@ _BINARY_SIGNATURES = (
     b"\x7fELF",
 )
 _TEX_MIME_TYPES = {"text/x-tex", "application/x-tex"}
+_DOCX_MIME_TYPES = {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 _BASE_MIME_TYPES = {"", "text/plain", "application/octet-stream"}
 
 
@@ -118,13 +120,28 @@ def decode_uploaded_text(
 ) -> AuditInput:
     source_name = sanitize_filename(filename)
     suffix = source_name.rsplit(".", 1)[-1].lower() if "." in source_name else ""
-    if suffix not in {"txt", "tex"}:
+    if suffix not in {"txt", "tex", "docx"}:
         raise AuditInputError("unsupported_file_type", 415, "file")
     if len(raw) > max_bytes:
         raise AuditInputError("upload_too_large", 413, "file")
     content_type = (mimetype or "").strip().lower().split(";", 1)[0]
-    if content_type not in _BASE_MIME_TYPES and not (suffix == "tex" and content_type in _TEX_MIME_TYPES):
+    allowed_mime = (
+        content_type in {"", "application/octet-stream", *_DOCX_MIME_TYPES}
+        if suffix == "docx"
+        else content_type in _BASE_MIME_TYPES
+        or (suffix == "tex" and content_type in _TEX_MIME_TYPES)
+    )
+    if not allowed_mime:
         raise AuditInputError("mismatched_file_type", 415, "file")
+    if suffix == "docx":
+        if not raw.startswith(b"PK\x03\x04"):
+            raise AuditInputError("mismatched_file_type", 415, "file")
+        try:
+            text = extract_docx_text(raw)
+        except InvalidDocxError as exc:
+            raise AuditInputError("invalid_docx", 400, "file") from exc
+        text = _validate_text(text, max_chars=max_chars, max_bytes=max_bytes, max_lines=max_lines)
+        return AuditInput(text=text, source_name=source_name, source_format="docx")
     if any(raw.startswith(signature) for signature in _BINARY_SIGNATURES) or b"\x00" in raw:
         raise AuditInputError("binary_file", 415, "file")
     try:

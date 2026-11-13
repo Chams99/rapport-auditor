@@ -16,7 +16,7 @@ py -3.10 -m venv .venv
 .venv\Scripts\python.exe -m pip_audit -r requirements-dev.lock
 ```
 
-The lock files record a Python 3.10 dependency resolution; use the same target Python and platform when reproducing it. Platform-marked packages can differ across operating systems. The Python tests cover the core heuristics, LaTeX preservation, citation-cue limits, API payload validation, HTML native forms, UTF-8 uploads, file and body boundaries, CSRF/origin/host restrictions, rate limiting, logging, response headers, and Waitress buffer configuration. Fixtures in `examples/synthetic/` are fictional and contain no student draft or real measured result.
+The lock files record a Python 3.10 dependency resolution; use the same target Python and platform when reproducing it. Platform-marked packages can differ across operating systems. The Python tests cover the core heuristics, LaTeX preservation, citation-cue limits, API payload validation, HTML native forms, UTF-8 and DOCX uploads, DOCX paragraph/table extraction and limits, CLI reading, file and body boundaries, CSRF/origin/host restrictions, rate limiting, logging, response headers, and Waitress buffer configuration. Fixtures in `examples/synthetic/` are fictional and contain no student draft or real measured result.
 
 To run only the security and request-boundary tests:
 

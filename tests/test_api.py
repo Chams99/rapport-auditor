@@ -87,6 +87,7 @@ def test_revision_preview_is_reversible_and_preserves_latex(api_post):
         ({"text": "   \n\t"}, 400),
         ({"text": "Some text.", "unknown": "value"}, 400),
         ({"text": "Some text.", "source_format": "pdf"}, 400),
+        ({"text": "Some text.", "source_format": "docx"}, 400),
     ],
 )
 def test_input_shape_and_unknown_fields_are_rejected(api_post, payload, expected_status):

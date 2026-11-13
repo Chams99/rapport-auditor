@@ -12,7 +12,7 @@ The earlier automated browser checks also capture [a clean synthetic review](doc
 
 ## Privacy and input
 
-In local mode, run the app on the machine that holds the draft. In public server mode, pasted text and uploads are sent to the hosting server over HTTPS for processing. The application does not call a third-party writing service and is designed not to persist draft content, but this does not control the host's memory, crash dumps, backups, or infrastructure telemetry. A hosted service needs a privacy notice specific to its provider and retention settings. The app accepts UTF-8 `.txt` and `.tex`; request and text limits are enforced, and oversized input is rejected rather than truncated. See [security and privacy notes](docs/SECURITY.md) and the [public deployment runbook](docs/PRODUCTION.md).
+In local mode, run the app on the machine that holds the draft. In public server mode, pasted text and uploads are sent to the hosting server over HTTPS for processing. The application does not call a third-party writing service and is designed not to persist draft content, but this does not control the host's memory, crash dumps, backups, or infrastructure telemetry. A hosted service needs a privacy notice specific to its provider and retention settings. The app accepts UTF-8 `.txt` / `.tex` and `.docx` Word documents; request, extracted-text, and upload limits are enforced, and oversized input is rejected rather than truncated. DOCX review extracts body paragraphs and tables; Word formatting and other document parts are not preserved. See [security and privacy notes](docs/SECURITY.md) and the [public deployment runbook](docs/PRODUCTION.md).
 
 The default CLI binds to `127.0.0.1`. Keep it loopback-only unless you have reviewed the network exposure and host configuration. The request parser uses bounded in-memory streams; the Waitress CLI also configures its input/output buffers so accepted documents and rendered results stay below its temporary-file spill thresholds. See [Security and privacy notes](docs/SECURITY.md) for the boundaries and operating-system limitations.
 
@@ -54,7 +54,7 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000). The server uses Waitress ra
 
 ## What it does
 
-- Accepts pasted text and UTF-8 `.txt` / `.tex` files.
+- Accepts pasted text, UTF-8 `.txt` / `.tex` files, and `.docx` Word documents. DOCX review extracts main-body paragraphs and tables as plain text; equations, images, headers, footers, comments, footnotes, and formatting are not preserved.
 - Shows word and sentence counts, repeated patterns, long/dense sentences, and a small list of formulaic English and French phrases.
 - Prompts a human to inspect selected empirical-reporting wording and visible citation cues; it never resolves references or verifies source support.
 - Previews suggested edits and a diff; nothing is written to the source file.
